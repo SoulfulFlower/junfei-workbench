@@ -1,0 +1,1030 @@
+{
+  "scope": "Captured source-grounded original9 responses and only consumed product facts. Tests rewrite lineage/times solely in isolated copies and mock every model call. Not a production result or authorization.",
+  "originalJobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+  "originalInputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7",
+  "product": {
+    "id": "IMP-US-B0HR85GQYF",
+    "name": "Women's Oversized Collared Cardigan Sweater with Gold Tone Buttons",
+    "status": "待补资料",
+    "brand": "Generic",
+    "manufacturer": "Generic",
+    "style": "Women collared button-front knit cardigan, loose long sleeves, five large round gold-tone buttons and rounded wavy hem",
+    "material": "Polyester",
+    "dimensions": "Garment measurements (cm): Size / Chest / Length / Sleeve; S /106 /63 /46; M /110 /64 /47",
+    "packageDimensions": "32 x 26 x 2 cm",
+    "packageWeight": "530 g (supplier packaged gross weight)",
+    "packageContents": "",
+    "colorNames": "Black, Cream, Gray, Light Blue, Navy Blue, Pink",
+    "sizeNames": "S, M",
+    "features": "Folded collar; five large round gold-tone front buttons; single-breasted button front; loose long sleeves with ribbed cuffs; knit texture; solid colors; rounded/wavy front hem. No fiber-percentage or performance claim.",
+    "targetAudience": "Women",
+    "copyNotes": "Only six source-matched colors and normal Small/S, Medium/M are eligible. Actual normal Amazon and FL6689 garment measurements match for S106/63/46 and M110/64/47cm only. L and above differ and remain excluded; all original96 ASINs and84exclusions preserved. Do not import Plus sizes or infer body-fit guarantees. Supplier names polyester; chart85-15 does not identify fibers, so no blend percentages/cotton/wool/cashmere claims. Numeric garment chart overrides generic length attribute. Styling jewelry, handbag, trousers and undershirt are props and not package contents. No proven anti-pilling, softness, warmth rating or waterproofing. Do not turn competitor review complaints into supplier facts. Source package matrix32x26x2cm/530g; chart35x28 is only2dimensions and is not substituted.",
+    "sourceImport": {
+      "amazon": {
+        "title": "Women's Oversized Collared Cardigan Sweater with Gold Tone Buttons"
+      },
+      "supplier": {
+        "title": "十色现货法式新款跨境春秋翻领针织宽松纯色上衣金属扣不规则下摆"
+      }
+    },
+    "competitorResearch": {
+      "US": {
+        "source": "sellersprite",
+        "keywords": [
+          {
+            "phrase": "collared cardigan women",
+            "selected": true,
+            "selectedByModel": false,
+            "selectionBasis": "Agent relevance choice from real500–8000 monthly terms; no model selection claimed",
+            "placement": "title",
+            "origins": [
+              "竞品反查"
+            ],
+            "sourceAsins": [
+              "B0HHMZX7MW"
+            ],
+            "metrics": [
+              {
+                "asin": "B0HHMZX7MW",
+                "source": "native_sellersprite_xlsx",
+                "searches": 3162,
+                "purchases": 12,
+                "purchaseRate": 0.004,
+                "trafficPercentage": 0,
+                "naturalRank": null,
+                "sourceRow": 3,
+                "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\exports\\collared-knit-competitor-reverse-B0HHMZX7MW-ReverseASIN-US-B0HHMZX7MW(43)-20261117.xlsx",
+                "sourceSha256": "99e4ed3d8f29d8c3799a53c9126579ae9473b2f0d57ca8a41c91801143172e02",
+                "updatedTime": "2026-11-17"
+              },
+              {
+                "source": "native_sellersprite_visible_partial",
+                "searches": 3162,
+                "purchases": 13,
+                "purchaseRateRaw": "0.40%",
+                "observedAt": "2026-11-17T08:16:32.091Z",
+                "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-keyword-mining-collared-cardigan-women.json",
+                "sourceSha256": "5dfc09d6d7f82f3dff754c68122bf21a521903c0320ee4d62ccd0a53f68abb17",
+                "sourceRow": 1,
+                "scope": "8 visible rows only; export_pending",
+                "originalResearchAnchor": "B0HRKB5NKS"
+              }
+            ]
+          },
+          {
+            "phrase": "balloon sleeve cardigan",
+            "selected": true,
+            "selectedByModel": false,
+            "selectionBasis": "Agent relevance choice from real500–8000 monthly terms; no model selection claimed",
+            "placement": "bullets",
+            "origins": [
+              "竞品反查"
+            ],
+            "sourceAsins": [
+              "B0HHMZX7MW"
+            ],
+            "metrics": [
+              {
+                "asin": "B0HHMZX7MW",
+                "source": "native_sellersprite_xlsx",
+                "searches": 956,
+                "purchases": 6,
+                "purchaseRate": 0.006500000000000001,
+                "trafficPercentage": 0,
+                "naturalRank": null,
+                "sourceRow": 4,
+                "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\exports\\collared-knit-competitor-reverse-B0HHMZX7MW-ReverseASIN-US-B0HHMZX7MW(43)-20261117.xlsx",
+                "sourceSha256": "99e4ed3d8f29d8c3799a53c9126579ae9473b2f0d57ca8a41c91801143172e02",
+                "updatedTime": "2026-11-17"
+              }
+            ]
+          },
+          {
+            "phrase": "collared cardigan",
+            "selected": true,
+            "selectedByModel": false,
+            "selectionBasis": "Agent relevant currently visible mining term only; original full export pending",
+            "placement": "bullets",
+            "origins": [
+              "关键词挖掘"
+            ],
+            "sourceAsins": [],
+            "miningSeeds": [
+              "collared cardigan women"
+            ],
+            "metrics": [
+              {
+                "source": "native_sellersprite_visible_partial",
+                "searches": 1100,
+                "purchases": 5,
+                "purchaseRateRaw": "0.46%",
+                "observedAt": "2026-11-17T08:16:32.091Z",
+                "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-keyword-mining-collared-cardigan-women.json",
+                "sourceSha256": "5dfc09d6d7f82f3dff754c68122bf21a521903c0320ee4d62ccd0a53f68abb17",
+                "sourceRow": 2,
+                "scope": "8 visible rows only; export_pending",
+                "originalResearchAnchor": "B0HRKB5NKS",
+                "seed": "collared cardigan women"
+              }
+            ]
+          },
+          {
+            "phrase": "collared cardigan sweaters for women",
+            "selected": true,
+            "selectedByModel": false,
+            "selectionBasis": "Agent relevant currently visible mining term only; original full export pending",
+            "placement": "bullets",
+            "origins": [
+              "关键词挖掘"
+            ],
+            "sourceAsins": [],
+            "miningSeeds": [
+              "collared cardigan women"
+            ],
+            "metrics": [
+              {
+                "source": "native_sellersprite_visible_partial",
+                "searches": 574,
+                "purchases": 7,
+                "purchaseRateRaw": "1.15%",
+                "observedAt": "2026-11-17T08:16:32.091Z",
+                "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-keyword-mining-collared-cardigan-women.json",
+                "sourceSha256": "5dfc09d6d7f82f3dff754c68122bf21a521903c0320ee4d62ccd0a53f68abb17",
+                "sourceRow": 3,
+                "scope": "8 visible rows only; export_pending",
+                "originalResearchAnchor": "B0HRKB5NKS",
+                "seed": "collared cardigan women"
+              }
+            ]
+          }
+        ],
+        "sources": [
+          {
+            "keywordData": [
+              {
+                "keyword": "womens collared button placket long sleeve knit sweater"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater"
+              },
+              {
+                "keyword": "women turtleneck cardigan button long sleeve"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater with necklac"
+              },
+              {
+                "keyword": "long sleeve button up cardigan collared sweater"
+              },
+              {
+                "keyword": "women mock neck asymmetric button oversized knit cardigan sweater"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweate"
+              },
+              {
+                "keyword": "oversized cardigan sweaters for women collared knitwear"
+              },
+              {
+                "keyword": "women's oversized collared knit sweater with large metal buttons"
+              },
+              {
+                "keyword": "classic cardigans"
+              },
+              {
+                "keyword": "women's oversized collared cardigan sweater"
+              },
+              {
+                "keyword": ",lapel collar oversized sweater"
+              },
+              {
+                "keyword": "womens stand collar fuzzy knit cardigan long sleeve sweater"
+              },
+              {
+                "keyword": "collared drawstring cardigan"
+              }
+            ]
+          },
+          {
+            "keywordData": [
+              {
+                "keyword": "collared sweaters for women"
+              },
+              {
+                "keyword": "collared cardigan women"
+              },
+              {
+                "keyword": "balloon sleeve cardigan"
+              },
+              {
+                "keyword": "ruffle sleeve cardigan"
+              },
+              {
+                "keyword": "francine oversized v neck cardigan"
+              },
+              {
+                "keyword": "ribbed knit cardigans for women"
+              },
+              {
+                "keyword": "women's oversized collared cardigan sweater"
+              },
+              {
+                "keyword": "women's collared v neck knit cardigan"
+              },
+              {
+                "keyword": "women's oversized ribbed knit cardigan with shawl collar"
+              },
+              {
+                "keyword": "womens shawl collar cardigan sweater rib knit asymmetric button detail"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan with large gold metal buttons"
+              },
+              {
+                "keyword": "womens lantern sleeve ribbed knit cardigan lightweight"
+              },
+              {
+                "keyword": "women button front cardigan sweaters, belted oversized knitted sweater"
+              },
+              {
+                "keyword": "oversized collared knit cardigan sweaters with large metal buttons"
+              },
+              {
+                "keyword": "women's long sleeve knit cardigan with shawl collar and pearl buttons"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan with decorative metal buttons"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater"
+              },
+              {
+                "keyword": "women's oversized collared knit"
+              },
+              {
+                "keyword": "womens turtleneck sweater gold buttons side asymmetric cardigan"
+              },
+              {
+                "keyword": "womens sweaters oversized 3/4 button sleeve"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan with large metal buttons"
+              },
+              {
+                "keyword": "oversized diamond knit cardigan"
+              },
+              {
+                "keyword": "women's frog button collared knit cardigan"
+              },
+              {
+                "keyword": "women’s oversized knit cardigan with collar"
+              },
+              {
+                "keyword": "women's shawl collar cardigan, rib knit sweater with asymmetric button"
+              },
+              {
+                "keyword": "women's collared button down cardigan"
+              },
+              {
+                "keyword": "women's oversized collared knit sweater"
+              },
+              {
+                "keyword": "women oversized collared knit sweater with large metal buttons"
+              },
+              {
+                "keyword": "large collar oversized sweater"
+              },
+              {
+                "keyword": "women's knit cardigan toggle button balloon sleeve crew neck"
+              },
+              {
+                "keyword": "women's oversized high neck pullover with gold shoulder buttons"
+              },
+              {
+                "keyword": "women's oversized collared cardigan sweater with gold tone buttons"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater with metal buttons"
+              },
+              {
+                "keyword": "women's contrast trim v neck cardigan with balloon sleeves and buttons"
+              },
+              {
+                "keyword": "oversized cardigans for women vintage"
+              },
+              {
+                "keyword": "womens sweaters for women shawl collar button cardigan"
+              },
+              {
+                "keyword": "drop shoulder sleeve cadigan"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan"
+              },
+              {
+                "keyword": "women's soft shawl collar knit cardigan with pearl buttons"
+              },
+              {
+                "keyword": "women's knit cardigan sailor collar fringe lounge oversized sweater"
+              },
+              {
+                "keyword": "womens oversized fall sweater v neck button up collared pullover"
+              },
+              {
+                "keyword": "women oversized knit sweater collared v neck"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater with necklac"
+              }
+            ]
+          },
+          {
+            "keywordData": [
+              {
+                "keyword": "women oversized collared knit sweater with large metal buttons"
+              },
+              {
+                "keyword": "womens oversized fall sweater v neck button up collared pullover"
+              },
+              {
+                "keyword": "big metal buttons oversized cardigan sweaters for women"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweate"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan with large metal buttons"
+              },
+              {
+                "keyword": "women's jeweled collar knit cardigan button-front sweater"
+              },
+              {
+                "keyword": "women's collared knit sweater long sleeve frog closure cardigan"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan sweater"
+              },
+              {
+                "keyword": "women button front cardigan sweaters, belted oversized knitted sweater"
+              },
+              {
+                "keyword": "women's oversized collared knit cardigan"
+              },
+              {
+                "keyword": "metal button sweater"
+              },
+              {
+                "keyword": "metal buttons oversized cardigan sweaters for women"
+              },
+              {
+                "keyword": "women's frog button knit sweater long sleeve collared cardigan"
+              },
+              {
+                "keyword": "women's oversized collared knit sweater"
+              },
+              {
+                "keyword": "metal button v neck oversized cardigan sweater for women"
+              },
+              {
+                "keyword": "oversized cardigan sweaters for women collared knitwear"
+              },
+              {
+                "keyword": "metal button oversized cardigan sweater for women"
+              },
+              {
+                "keyword": "women's oversized collared cardigan sweater"
+              },
+              {
+                "keyword": "women’s oversized knit cardigan with collar"
+              },
+              {
+                "keyword": "waffle knit sweater long sleeve collared button down cardigan"
+              },
+              {
+                "keyword": "women's collared knit sweater long sleeve frog button cardigan"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "reviewResearch": {
+      "US": {
+        "market": "US",
+        "input": "B0HHF45NTG\nB0HHMZX7MW\nB0HJGV3B75",
+        "samples": [
+          {
+            "id": "R1",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHF45NTG",
+            "author": "Amazon Customer",
+            "title": "Classy",
+            "text": "So beautiful",
+            "rating": 5,
+            "date": "Reviewed in the United States on November 13, 2026",
+            "metadataRaw": "Size: LargeColor: Black\nVerified Purchase",
+            "verifiedPurchase": true,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHF45NTG.json",
+            "sourceSha256": "997525ee9727f282fd7b7f1ab705fe6830dd38e8d68f06675675831d959cd1e7",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Featuring-button-front-silhouette/dp/B0HHF45NTG/ref=sr_1_3?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-3&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:09.293Z",
+            "rawReviewBlock": "Amazon Customer\n5 out of 5 stars\nClassy\nReviewed in the United States on November 13, 2026\nSize: LargeColor: Black\nVerified Purchase\n\nSo beautiful\n\nHelpful",
+            "originalSampleId": "native-summary-fef5ee1652d4f15391825171"
+          },
+          {
+            "id": "R2",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHF45NTG",
+            "author": "Sherif",
+            "title": "The material is of extremely poor quality",
+            "text": "The material is of extremely poor quality. As soon as you remove it from the packaging, it starts pilling and shedding fibers, which indicates that the material is very low quality.",
+            "rating": 2,
+            "date": "Reviewed in the United States on November 15, 2026",
+            "metadataRaw": "Size: MediumColor: Red\nVerified Purchase",
+            "verifiedPurchase": true,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHF45NTG.json",
+            "sourceSha256": "997525ee9727f282fd7b7f1ab705fe6830dd38e8d68f06675675831d959cd1e7",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Featuring-button-front-silhouette/dp/B0HHF45NTG/ref=sr_1_3?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-3&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:09.293Z",
+            "rawReviewBlock": "Sherif\n2 out of 5 stars\nThe material is of extremely poor quality\nReviewed in the United States on November 15, 2026\nSize: MediumColor: Red\nVerified Purchase\n\nThe material is of extremely poor quality. As soon as you remove it from the packaging, it starts pilling and shedding fibers, which indicates that the material is very low quality.\n\nHelpful",
+            "originalSampleId": "native-summary-41c9812c798ac3e23d564243"
+          },
+          {
+            "id": "R3",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHF45NTG",
+            "author": "Paula Ribeiro",
+            "title": "Amazing",
+            "text": "Love",
+            "rating": 5,
+            "date": "Reviewed in the United States on November 1, 2026",
+            "metadataRaw": "Size: LargeColor: Olive Green\nVerified Purchase",
+            "verifiedPurchase": true,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHF45NTG.json",
+            "sourceSha256": "997525ee9727f282fd7b7f1ab705fe6830dd38e8d68f06675675831d959cd1e7",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Featuring-button-front-silhouette/dp/B0HHF45NTG/ref=sr_1_3?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-3&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:09.293Z",
+            "rawReviewBlock": "Paula Ribeiro\n5 out of 5 stars\nAmazing\nReviewed in the United States on November 1, 2026\nSize: LargeColor: Olive Green\nVerified Purchase\n\nLove\n\nHelpful",
+            "originalSampleId": "native-summary-7fe19bc59d5cf1e516883a49"
+          },
+          {
+            "id": "R4",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHF45NTG",
+            "author": "Amazon Customer",
+            "title": "Quality",
+            "text": "Button holes not aligned and material is not soft.",
+            "rating": 2,
+            "date": "Reviewed in the United States on October 26, 2026",
+            "metadataRaw": "Size: MediumColor: Olive Green\nVerified Purchase",
+            "verifiedPurchase": true,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHF45NTG.json",
+            "sourceSha256": "997525ee9727f282fd7b7f1ab705fe6830dd38e8d68f06675675831d959cd1e7",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Featuring-button-front-silhouette/dp/B0HHF45NTG/ref=sr_1_3?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-3&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:09.293Z",
+            "rawReviewBlock": "Amazon Customer\n2 out of 5 stars\nQuality\nReviewed in the United States on October 26, 2026\nSize: MediumColor: Olive Green\nVerified Purchase\n\nButton holes not aligned and material is not soft.\n\n3 people found this helpful\nHelpful",
+            "originalSampleId": "native-summary-a44cfd432339731cd39ccbd7"
+          },
+          {
+            "id": "R5",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHMZX7MW",
+            "author": "Disappointed",
+            "title": "Disappointed",
+            "text": "Quality was disappointing and not well made. Size was accurate. Was not worth the price value.",
+            "rating": 3,
+            "date": "Reviewed in the United States on November 8, 2026",
+            "metadataRaw": "Size: LargeColor: Green\nVerified Purchase",
+            "verifiedPurchase": true,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHMZX7MW.json",
+            "sourceSha256": "8f310b7d07008da1c48c22a262908f651ebaa55cb87bd3ef890509e2629b1b5b",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Cardigan-Sweater-Gold-Tone/dp/B0HHMZX7MW/ref=sr_1_4?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-4&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:20.822Z",
+            "rawReviewBlock": "Disappointed\n3 out of 5 stars\nDisappointed\nReviewed in the United States on November 8, 2026\nSize: LargeColor: Green\nVerified Purchase\n\nQuality was disappointing and not well made. Size was accurate. Was not worth the price value.\n\nHelpful",
+            "originalSampleId": "native-summary-e0637df0c2d8775ddc1669e0"
+          },
+          {
+            "id": "R6",
+            "idScope": "local deterministic sample ID; actual Amazon review ID not captured",
+            "asin": "B0HHMZX7MW",
+            "author": "Emily",
+            "title": "I really like it.",
+            "text": "This outfit is quite unique; I bought it for a party, and my friends all really liked it.",
+            "rating": 5,
+            "date": "Reviewed in the United States on October 19, 2026",
+            "metadataRaw": "Size: X-LargeColor: Green",
+            "verifiedPurchase": false,
+            "vine": false,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHMZX7MW.json",
+            "sourceSha256": "8f310b7d07008da1c48c22a262908f651ebaa55cb87bd3ef890509e2629b1b5b",
+            "sourceUrl": "https://www.amazon.com/Oversized-Collared-Cardigan-Sweater-Gold-Tone/dp/B0HHMZX7MW/ref=sr_1_4?dib=eyJ2IjoiMSJ9.lXUdJrg6YjKOYnTHw9hy8FRyp1XLcYA7tuVIto2hIAUcXiHCqOH0Yk1WvXQ90DSthWCbUsFpYICZQvD4kBVKdCtCMcyibezAS6mganvW9EQ0XddAjswZZxs7p0lcMH4K8xiKYPIwOEnhu-T01kuwYXpv-695W8nQhAgaxMnr7FeMwjkUfLnyFU0NcVvO3B23bUXfwE78cotdITLIHC2XhHecD-1zGX80-p5I9mSMSypWXpnYmSWkbRdEALBwZWJp-4cWt-6wSRT84kq8d-TGcBoEW8OQU8XLBZ8InimgU4Q.XKjWArQBNC0MuZbLAIPcDuvG9mLrz87jwKO0w_pVtlY&dib_tag=se&keywords=Women%27s%2BOversized%2BCollared%2BKnit%2BCardigan&qid=1794900554&sr=8-4&th=1&psc=1",
+            "observedAt": "2026-11-17T08:16:20.822Z",
+            "rawReviewBlock": "Emily\n5 out of 5 stars\nI really like it.\nReviewed in the United States on October 19, 2026\nSize: X-LargeColor: Green\n\nThis outfit is quite unique; I bought it for a party, and my friends all really liked it.\n\nOne person found this helpful\nHelpful",
+            "originalSampleId": "native-summary-c57306f94f88227b9dd2c2d2"
+          }
+        ],
+        "sources": [
+          {
+            "asin": "B0HHF45NTG",
+            "status": "ok",
+            "count": 4,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHF45NTG.json",
+            "sourceSha256": "997525ee9727f282fd7b7f1ab705fe6830dd38e8d68f06675675831d959cd1e7",
+            "usage": "Actual exact-cut competitor customer feedback only; not proof of this supplier material, sizing or workmanship"
+          },
+          {
+            "asin": "B0HHMZX7MW",
+            "status": "ok",
+            "count": 2,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HHMZX7MW.json",
+            "sourceSha256": "8f310b7d07008da1c48c22a262908f651ebaa55cb87bd3ef890509e2629b1b5b",
+            "usage": "Actual exact-cut competitor customer feedback only; not proof of this supplier material, sizing or workmanship"
+          },
+          {
+            "asin": "B0HJGV3B75",
+            "status": "empty",
+            "count": 0,
+            "sourcePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-competitor-reviews-B0HJGV3B75.json",
+            "sourceSha256": "eb3e6c7fb81c7b9f4fd1d4d2ded3b57d2aa7c83c0446f57baa5e2ab7bd34291b",
+            "usage": "Actual exact-cut competitor customer feedback only; not proof of this supplier material, sizing or workmanship"
+          }
+        ],
+        "fetchedAt": "2026-11-17T08:19:26.011466+00:00",
+        "limitation": "Six visible actual review bodies from two of the three original exact-cut competitor parents; third query succeeded with zero bodies. Five Verified Purchase, one unverified. Local sample IDs are not Amazon reviewIDs. Same-style research originally captured for blockedPlusanchor, reused transparently. Feedback is not source material/size/workmanship facts. No model analysis has been run.",
+        "analysisStatus": "completed",
+        "analysisPendingReason": "",
+        "sourceEvidencePath": "C:\\Users\\Administrator\\Documents\\ChatGPT\\钧飞工作台\\research-batch3-20261117\\collared-knit-review-samples.prepared.json",
+        "analysis": {
+          "themes": [
+            {
+              "category": "pain_point",
+              "title": "有买家反映拆包后起球、掉纤维",
+              "recommendation": "这是单条竞品评论中的主观反馈，并非自家产品的性能事实。可检查自家实物及洗护表现；未经验证，不使用“不起球”“不掉毛”等文案。",
+              "evidenceIds": [
+                "R2"
+              ]
+            },
+            {
+              "category": "pain_point",
+              "title": "面料柔软度影响穿着感受",
+              "recommendation": "该买家认为面料不够柔软。自家已知材质为聚酯纤维，可在详情页如实标注，并展示针织纹理实拍；未经验证，不承诺柔软触感。",
+              "evidenceIds": [
+                "R4"
+              ]
+            },
+            {
+              "category": "pain_point",
+              "title": "纽扣孔对位是做工关注点",
+              "recommendation": "该买家反映纽扣孔未对齐。可将门襟与扣眼对位纳入自家实物检查；只有确认实物一致后，才使用门襟细节近照，不据此宣称做工优于其他产品。",
+              "evidenceIds": [
+                "R4"
+              ]
+            },
+            {
+              "category": "pain_point",
+              "title": "做工与价格是否相称引发疑虑",
+              "recommendation": "这是买家对竞品的价值判断。自家可围绕已提供的翻领、五颗金色调纽扣和波浪形前下摆展示设计细节；不要将细节直接表述为高品质或物有所值的保证。",
+              "evidenceIds": [
+                "R5"
+              ]
+            },
+            {
+              "category": "positive",
+              "title": "有买家认可竞品外观",
+              "recommendation": "两条好评表达了喜爱，但没有提供可核实的具体原因。自家可用实拍展示已知的翻领、宽松长袖和金色调纽扣，让买家自行判断外观；不将好评措辞改写成产品承诺。",
+              "evidenceIds": [
+                "R1",
+                "R3"
+              ]
+            },
+            {
+              "category": "positive",
+              "title": "有买家认为竞品尺码准确",
+              "recommendation": "这一评价不能证明自家尺码准确。可依据已提供的数据列出 S、M 的胸围、衣长和袖长，并标明是成衣尺寸；其他尺码或合身效果须核实后再展示。",
+              "evidenceIds": [
+                "R5"
+              ]
+            },
+            {
+              "category": "use_case",
+              "title": "聚会是评论中提到的穿着场景",
+              "recommendation": "该买家表示为聚会购买且朋友喜欢，属于个人经历。若自家实物搭配拍摄确认适合该场景，可展示聚会穿搭图片；不承诺穿着者会获得他人称赞。",
+              "evidenceIds": [
+                "R6"
+              ]
+            }
+          ],
+          "analysedAt": "2026-11-18T07:12:37.279442+00:00",
+          "sampleCount": 6,
+          "warning": "买家观点与竞品反馈不等于本产品事实；文案和图片中的功能承诺须依据本产品资料核实。"
+        }
+      }
+    }
+  },
+  "responses": [
+    {
+      "originalReceiptId": "b5459ba186514bfbb63577374981d0df",
+      "originalSha256": "fcca8dd74d785e00ac39a26a450fcbced474209d280777dbe393ce02157e5594",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_046307a77e34df1f016afd4fee4c4087d0bdf7d545da577aa5",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\n  \"title\": \"Women's Collared Knit Cardigan With Gold-Tone Buttons and Wavy Hem\",\n  \"highlights\": \"Polyester, Single-Breasted Closure, Ribbed Cuffs, Loose Long Sleeves, S and M\",\n  \"bullets\": \"[Knit Construction]: Material: Polyester with a knit texture and a solid-color design. A folded collar shapes the neckline, and the knit extends through the long sleeves. This collared cardigan sweater for women combines a shirt-style collar with a knit button-front body, giving you the material and construction details to consider before selecting a color.\\n[Button-Front Detail]: Closure: Single-breasted front with five large, round gold-tone buttons. The buttons line the opening beneath the folded collar, allowing the cardigan to be worn fastened or left open over a separate top. Their shape, count, and finish are design details to consider if a button-front knit is the style you are looking for.\\n[Sleeves and Hem]: Shape: Loose long sleeves finished with ribbed cuffs; the front has a rounded, wavy hem. The cuffs mark the ends of the sleeves, while the curved lower edge shapes the cardigan's front outline. These details help you distinguish the sleeve and hem design when choosing a knit layer for spring or fall outfits.\\n[Size Selection]: Sizes: S and M. Garment measurements in cm, in chest / length / sleeve order: S 106 / 63 / 46; M 110 / 64 / 47. These figures describe the cardigan rather than body measurements or a promised fit. Compare all three dimensions with a garment you already wear before selecting a size; the loose-sleeve description does not replace the listed sleeve measurements.\\n[Color and Styling]: Audience: Women; solid-color choices are Black, Cream, Gray, Light Blue, Navy Blue, and Pink. The gold-tone button front and shaped hem are part of this cardigan's design, giving you details to consider alongside your selected color. Choose a version for spring or fall outfits; jewelry, handbags, trousers, and undershirts used as styling props are not included.\",\n  \"description\": \"Collared Cardigan for Women\\nMaterial: Polyester\\nStyle: Button-front knit cardigan\\nCollar: Folded\\nSleeves: Loose long sleeves with ribbed cuffs\\nFront closure: Single-breasted with five large round gold-tone buttons\\nHem: Rounded, wavy front hem\\nColor options: Black, Cream, Gray, Light Blue, Navy Blue, Pink\\nSizes: S, M\\nGarment measurements (cm; chest / length / sleeve): S 106 / 63 / 46; M 110 / 64 / 47\\n\\nProduct: women's collared button-front knit cardigan with rounded hem\\n\\nNotes:\\n1. Due to manual measurement, there may be slight differences in size. Thank you for your understanding\\n2. Due to differences in monitors and lighting, the image may not reflect the actual color of the item. Thank you for your understanding\",\n  \"terms\": \"polyester sweater buttonfront single breasted ribbed cuffs folded collar loose long sleeves rounded curved edge textured solid color spring fall layering open front ladies top chest length measurements neckline closure fastening\",\n  \"zh\": \"女士翻领针织开衫，金色调纽扣与波浪形下摆\\n[针织结构]：材质：聚酯纤维，带针织纹理，采用纯色设计。翻折领勾勒领口，针织结构延伸至长袖。这款女士翻领针织开衫结合了衬衫式领型与纽扣开襟结构，方便在选择颜色前了解其材质和结构。\\n[纽扣门襟]：开合方式：单排扣门襟，配有五颗大号圆形金色调纽扣。纽扣沿翻折领下方的开襟排列；开衫可以扣起，也可以敞开穿在另一件上衣外。纽扣的形状、数量和外观是选择纽扣开襟针织款时可参考的设计细节。\\n[袖口与下摆]：款式：宽松长袖配罗纹袖口，前下摆呈圆弧波浪形。袖口界定袖子末端，弧形下缘则形成开衫正面的轮廓。挑选春秋季针织叠穿单品时，可据此辨认袖部与下摆设计。\\n[尺码选择]：尺码：S和M。成衣尺寸以厘米计，按胸围／衣长／袖长排列：S为106／63／46；M为110／64／47。这些是开衫尺寸，不是人体尺寸，也不代表穿着效果。选码前可将三项尺寸与已有衣物比较；宽松袖型的描述不能替代所列袖长数据。\\n[颜色与搭配]：适用人群：女士；纯色可选黑色、奶油色、灰色、浅蓝色、海军蓝和粉色。金色调纽扣门襟与造型下摆是这款开衫的设计细节，可与所选颜色一并考虑。可选择喜欢的颜色用于春秋季穿搭；作为搭配道具的首饰、手提包、裤子和内搭上衣不包含在内。\\n\\n女士翻领开衫\\n材质：聚酯纤维\\n款式：纽扣开襟针织开衫\\n衣领：翻折领\\n袖子：宽松长袖，配罗纹袖口\\n前襟开合：单排扣，配五颗大号圆形金色调纽扣\\n下摆：圆弧波浪形前下摆\\n可选颜色：黑色、奶油色、灰色、浅蓝色、海军蓝、粉色\\n尺码：S、M\\n成衣尺寸（厘米；胸围／衣长／袖长）：S 106／63／46；M 110／64／47\\n\\n商品：女士翻领纽扣开襟圆弧下摆针织开衫\\n\\n注意事项：\\n1. 由于手工测量，尺寸可能略有差异。感谢您的理解\\n2. 由于显示器和光线不同，图片可能无法准确反映商品的实际颜色。感谢您的理解\",\n  \"warnings\": \"包装内件数量未确认，描述采用“Product:”而非件数。仅S、M的成衣尺寸及六种颜色有一致资料；不扩展至其他尺码。已知材质为聚酯纤维，但无可靠纤维百分比；不据竞品评论推断柔软度、起球、掉纤维或做工表现。适用且有500–8000月搜索量数据的所选词有限；部分词缺购买率或流量占比，不将未知指标视为零。\",\n  \"translations\": {\n    \"title\": \"女士翻领针织开衫，金色调纽扣与波浪形下摆\",\n    \"highlights\": \"聚酯纤维，单排扣开合，罗纹袖口，宽松长袖，S和M码\",\n    \"bullets\": \"[针织结构]：材质：聚酯纤维，带针织纹理，采用纯色设计。翻折领勾勒领口，针织结构延伸至长袖。这款女士翻领针织开衫结合了衬衫式领型与纽扣开襟结构，方便在选择颜色前了解其材质和结构。\\n[纽扣门襟]：开合方式：单排扣门襟，配有五颗大号圆形金色调纽扣。纽扣沿翻折领下方的开襟排列；开衫可以扣起，也可以敞开穿在另一件上衣外。纽扣的形状、数量和外观是选择纽扣开襟针织款时可参考的设计细节。\\n[袖口与下摆]：款式：宽松长袖配罗纹袖口，前下摆呈圆弧波浪形。袖口界定袖子末端，弧形下缘则形成开衫正面的轮廓。挑选春秋季针织叠穿单品时，可据此辨认袖部与下摆设计。\\n[尺码选择]：尺码：S和M。成衣尺寸以厘米计，按胸围／衣长／袖长排列：S为106／63／46；M为110／64／47。这些是开衫尺寸，不是人体尺寸，也不代表穿着效果。选码前可将三项尺寸与已有衣物比较；宽松袖型的描述不能替代所列袖长数据。\\n[颜色与搭配]：适用人群：女士；纯色可选黑色、奶油色、灰色、浅蓝色、海军蓝和粉色。金色调纽扣门襟与造型下摆是这款开衫的设计细节，可与所选颜色一并考虑。可选择喜欢的颜色用于春秋季穿搭；作为搭配道具的首饰、手提包、裤子和内搭上衣不包含在内。\",\n    \"description\": \"女士翻领开衫\\n材质：聚酯纤维\\n款式：纽扣开襟针织开衫\\n衣领：翻折领\\n袖子：宽松长袖，配罗纹袖口\\n前襟开合：单排扣，配五颗大号圆形金色调纽扣\\n下摆：圆弧波浪形前下摆\\n可选颜色：黑色、奶油色、灰色、浅蓝色、海军蓝、粉色\\n尺码：S、M\\n成衣尺寸（厘米；胸围／衣长／袖长）：S 106／63／46；M 110／64／47\\n\\n商品：女士翻领纽扣开襟圆弧下摆针织开衫\\n\\n注意事项：\\n1. 由于手工测量，尺寸可能略有差异。感谢您的理解\\n2. 由于显示器和光线不同，图片可能无法准确反映商品的实际颜色。感谢您的理解\",\n    \"terms\": \"聚酯纤维 毛衣 纽扣开襟 单排扣 罗纹袖口 翻折领 宽松长袖 圆弧下缘 弧形边缘 纹理 纯色 春季 秋季 叠穿 前开襟 女士 上衣 胸围 衣长 成衣测量 领口 开合 扣合\"\n  },\n  \"contentAudit\": {\n    \"keywordPlacements\": [\n      {\n        \"phrase\": \"collared cardigan women\",\n        \"placement\": \"title\",\n        \"reason\": \"改为自然英语所有格“Women's Collared Knit Cardigan”，保留女士翻领开衫的核心意图。\"\n      },\n      {\n        \"phrase\": \"collared cardigan sweaters for women\",\n        \"placement\": \"bullet 1\",\n        \"reason\": \"将复数改为指代单件商品的“collared cardigan sweater for women”。\"\n      },\n      {\n        \"phrase\": \"collared cardigan\",\n        \"placement\": \"description\",\n        \"reason\": \"用于描述开头标题“Collared Cardigan for Women”。\"\n      }\n    ],\n    \"omittedKeywords\": [\n      {\n        \"phrase\": \"balloon sleeve cardigan\",\n        \"reason\": \"仅确认宽松长袖，未确认灯笼袖结构，不能据关键词推断。\"\n      }\n    ],\n    \"factChecks\": [\n      \"标题、亮点、五点及描述均只使用已提供的款式、材质、颜色和S／M成衣尺寸。\",\n      \"未把成衣尺寸写成人体尺寸，也未把包装尺寸或包装毛重写成商品尺寸或净重。\",\n      \"包装数量未知，描述使用Product行；搭配道具明确不作为包含物。\",\n      \"未采用竞品评论作为本商品性能或做工证据；未使用无依据的纤维比例和保暖等宣称。\"\n    ]\n  },\n  \"editorialPlan\": \"面向选购女士翻领针织开衫的买家，五点分别回答材质结构、纽扣开合、袖口下摆、S／M尺码和颜色与搭配道具问题。优先使用与实物相符的已测关键词；缺失的数量、纤维比例及性能信息不进入买家文案。\"\n}",
+                "reasoning_content": "**Checking search term coverage**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 9223,
+            "completion_tokens_details": {
+              "reasoning_tokens": 6436
+            },
+            "prompt_tokens": 4534,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 13757
+          }
+        },
+        "createdAt": "2026-11-18T07:15:37.234090+00:00",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "39c07c7d7fb14db290cad133bcc1ba6a",
+      "originalSha256": "b4d13cf45868d1bbe0f19da08db77ddaa93408be3e61968bd9085845cb99b7fa",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_08b502a7d565cd57016afd509c0db487d0b61aacd07006d7b7",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\n  \"title\": \"Women's Collared Knit Cardigan With Five Gold-Tone Front Buttons\",\n  \"highlights\": \"Polyester, loose long sleeves, ribbed cuffs, rounded wavy front hem, sizes S and M\",\n  \"bullets\": \"[Knit and collar] This collared cardigan sweater for women is made from polyester with a knit texture. A folded collar frames the neckline above the button front, giving the top edge a shirt-style shape. The solid-color design leaves the texture and collar visible without a printed pattern.\\n[Button front] Five large, round gold-tone buttons close the single-breasted front. You can fasten the opening for a closed cardigan or leave it open over a separate top. The buttons run down the front, giving you several fastening points along the opening instead of just one at the neckline.\\n[Sleeve finish] Loose long sleeves end in ribbed cuffs, giving the arms a less close-cut outline and a defined finish at the wrists. The cuff ribbing adds a change in texture at the end of each sleeve. Listed sleeve lengths are 46 cm in S and 47 cm in M; these are garment measurements, not arm measurements.\\n[Color choices] Choose from Black, Cream, Gray, Light Blue, Navy Blue, and Pink, each listed as a solid-color knit. The two blues are separate options if you want a lighter or darker shade. Pair a chosen color with a plain or patterned top for a spring or fall outfit; the cardigan adds color without adding another print.\\n[Garment measurements] Size S measures 106 cm at the chest and 63 cm in length; M measures 110 cm at the chest and 64 cm in length. These are measurements of the cardigan, not the wearer. Compare the chest and length with a cardigan you already wear to see which size is closer to the shape you prefer.\",\n  \"description\": \"Collared Cardigan Sweater for Women\\nMaterial: Polyester\\nTexture: Knit\\nCollar: Folded\\nSleeves: Loose long sleeves with ribbed cuffs\\nFront closure: Single-breasted with five large, round gold-tone buttons\\nHem: Rounded, wavy front hem\\nColor options: Black, Cream, Gray, Light Blue, Navy Blue, Pink\\nSizes: S, M\\nGarment measurements (cm; chest / length / sleeve): S 106 / 63 / 46; M 110 / 64 / 47\\n\\nProduct: women's collared button-front knit cardigan with a rounded hem\\n\\nNotes:\\n1. Due to manual measurement, there may be slight differences in size. Thank you for your understanding\\n2. Due to differences in monitors and lighting, the image may not reflect the actual color of the item. Thank you for your understanding\",\n  \"terms\": \"polyester sweater single breasted closure folded neckline loose long sleeves ribbed cuffs rounded wavy hem solid color spring fall layering ladies textured curved edge fastening shirt buttoned open autumn womenswear\",\n  \"translations_zh\": {\n    \"title\": \"女士翻领针织开衫，配五颗金色前襟纽扣\",\n    \"highlights\": \"聚酯纤维，宽松长袖，罗纹袖口，前摆圆弧波浪形，S 和 M 码\",\n    \"bullets\": \"[针织面料与翻领] 这款女士翻领开衫采用聚酯纤维制成，带有针织纹理。翻折衣领围绕领口，位于纽扣前襟上方，形成衬衫式的领口轮廓。纯色设计没有印花，针织纹理和衣领形状清晰可见。\\n[纽扣前襟] 单排扣前襟配有五颗大号圆形金色纽扣。扣上纽扣可合拢开衫，也可以敞开穿在另一件上衣外面。纽扣沿前襟排列，提供多个扣合位置，而不是只在领口设置一个扣合点。\\n[袖口设计] 宽松长袖末端采用罗纹袖口，手臂处的轮廓较为宽松，腕部则有清晰的收尾。罗纹使袖子末端呈现不同的纹理。S 码标注袖长为 46 厘米，M 码为 47 厘米；这些是衣服的尺寸，不是手臂尺寸。\\n[颜色选择] 可选择黑色、奶油色、灰色、浅蓝色、藏蓝色和粉色，均为纯色针织款。浅蓝色和藏蓝色是两个不同的选项，可按想要的色调深浅选择。春秋季可将选定颜色搭配纯色或印花上衣；开衫本身增添颜色，但不增加另一种印花。\\n[衣服尺寸] S 码胸围为 106 厘米、衣长为 63 厘米；M 码胸围为 110 厘米、衣长为 64 厘米。这些是开衫的尺寸，不是穿着者的身体尺寸。可将胸围和衣长与已有开衫比较，判断哪个尺码更接近自己偏好的廓形。\",\n    \"description\": \"女士翻领针织开衫\\n材质: 聚酯纤维\\n纹理: 针织\\n衣领: 翻折衣领\\n袖子: 罗纹袖口宽松长袖\\n前襟闭合方式: 单排扣，配五颗大号圆形金色纽扣\\n下摆: 前摆呈圆弧波浪形\\n颜色选项: 黑色、奶油色、灰色、浅蓝色、藏蓝色、粉色\\n尺码: S、M\\n衣服尺寸（厘米；胸围 / 衣长 / 袖长）: S 106 / 63 / 46；M 110 / 64 / 47\\n\\n产品: 女士翻领纽扣前襟圆弧下摆针织开衫\\n\\n注意事项:\\n1. 由于手工测量，尺寸可能略有差异。感谢您的理解\\n2. 由于显示器和光线不同，图片可能无法准确反映商品的实际颜色。感谢您的理解\",\n    \"terms\": \"聚酯纤维 毛衣 单排扣 闭合 翻折领口 宽松长袖 罗纹袖口 圆弧波浪下摆 纯色 春季 秋季 叠穿 女装 针织纹理 弧形边缘 纽扣开合 敞开穿着\"\n  },\n  \"internal_warnings_zh\": [\n    \"未使用“balloon sleeve cardigan”：仅确认宽松长袖，未确认灯笼袖。\",\n    \"所选关键词未提供搜索量、购买量、购买率或竞品流量占比，无法按这些指标评估优先级。\",\n    \"包装数量未确认，因此描述使用“Product:”行；未将包装尺寸或包装毛重写成商品尺寸或净重。\"\n  ]\n}",
+                "reasoning_content": "**Double-checking bullet length**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 8883,
+            "completion_tokens_details": {
+              "reasoning_tokens": 7334
+            },
+            "prompt_tokens": 3352,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 12235
+          }
+        },
+        "createdAt": "2026-11-18T07:18:26.031213+00:00",
+        "purpose": "listing_unslop",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "0fdcdb4f0c4e433f99c0ee633be112d3",
+      "originalSha256": "b542250dfffe8612858c96d297240ba4393ccdb629cd646d79ccaa5428499578",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_08c300594806accc016afd5144a9a487d080566f8eea0de051",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"issues\":[{\"bullet\":1,\"kind\":\"mixed_topic\",\"quote\":\"is made from polyester with a knit texture\",\"reason\":\"面料和针织纹理是独立于翻领的卖点；这条同时讲了两类产品特点。\"},{\"bullet\":1,\"kind\":\"repetition\",\"quote\":\"The solid-color design leaves the texture and collar visible without a printed pattern.\",\"reason\":\"纯色特点已在第4条集中说明；整句可删除。\"},{\"bullet\":2,\"kind\":\"padding\",\"quote\":\"The buttons run down the front, giving you several fastening points along the opening instead of just one at the neckline.\",\"reason\":\"前文已说明五颗纽扣扣合前襟；与领口单颗纽扣的对比只是重复解释。\"},{\"bullet\":3,\"kind\":\"repetition\",\"quote\":\"The cuff ribbing adds a change in texture at the end of each sleeve.\",\"reason\":\"前一句已介绍罗纹袖口及其袖腕收尾效果；这句重复袖口特点。\"},{\"bullet\":3,\"kind\":\"mixed_topic\",\"quote\":\"Listed sleeve lengths are 46 cm in S and 47 cm in M; these are garment measurements, not arm measurements.\",\"reason\":\"尺码测量数据应归入第5条，不要在袖型卖点中切换到尺码；后半句也是多余解释。\"},{\"bullet\":4,\"kind\":\"padding\",\"quote\":\"The two blues are separate options if you want a lighter or darker shade.\",\"reason\":\"颜色清单已列出浅蓝和海军蓝，无须再说明它们是深浅不同的选项。\"},{\"bullet\":4,\"kind\":\"repetition\",\"quote\":\"the cardigan adds color without adding another print\",\"reason\":\"重复首句已说明的纯色、无印花特点。\"},{\"bullet\":5,\"kind\":\"padding\",\"quote\":\"These are measurements of the cardigan, not the wearer.\",\"reason\":\"标题已标明是成衣测量数据；排除人体测量的说明多余。\"}]}",
+                "reasoning_content": "**Reviewing cardigan feature split**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1983,
+            "completion_tokens_details": {
+              "reasoning_tokens": 1552
+            },
+            "prompt_tokens": 1298,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 3281
+          }
+        },
+        "createdAt": "2026-11-18T07:19:03.975929+00:00",
+        "purpose": "listing_bullet_review",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "cb55b7bc858b408ba27c750f5b5ab075",
+      "originalSha256": "5bae9c05e9a808624d23f709ebbe4635610509b154f0b0352646fc1322757c5e",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_0ad96b295418847c016afd516a93b087d08411719d74994078",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"revisions\":[{\"bullet\":1,\"text\":\"[Folded collar] The folded collar gives this collared cardigan sweater for women a shirt-style neckline. Pair it with a crew-neck top to let the folded edge sit above the top's neckline, or wear a V-neck top when you want some open space below the collar.\",\"translation\":\"[翻折衣领] 这款女士翻领开衫采用翻折衣领，形成衬衫式领口。内搭圆领上衣时，翻折的领边会露在内搭领口上方；搭配 V 领上衣，则能在衣领下方留出更多空间。\"},{\"bullet\":2,\"text\":\"[Button front] Five large, round gold-tone buttons run down the single-breasted front, making the closure a visible part of the cardigan's design. Fasten all five for a closed front, leave them undone to show a separate top, or button only the middle when you want the neckline and lower opening left open.\",\"translation\":\"[纽扣前襟] 五颗大号圆形金色纽扣沿单排扣前襟排列，也是开衫外观的一部分。可以全部扣上，也可以敞开露出内搭；只扣中间几颗时，领口和下摆处仍可保持敞开。\"},{\"bullet\":3,\"text\":\"[Sleeve shape] Loose long sleeves give the arms a relaxed outline, while ribbed cuffs define where the sleeves end at the wrists. Layer the cardigan over a close-fitting long-sleeved top for a spring or fall outfit. Choose a sleeveless top underneath if you prefer less fabric inside the loose sleeves.\",\"translation\":\"[袖型] 宽松长袖呈现舒展的手臂轮廓，罗纹袖口在手腕处收尾。春秋穿搭时，可以内搭贴身长袖上衣。如果希望宽松袖筒里少一层布料，也可以选择无袖内搭。\"},{\"bullet\":4,\"text\":\"[Solid-color options] The cardigan comes in Black, Cream, Gray, Light Blue, Navy Blue, and Pink, each without a printed pattern. Wear it over a patterned top for a spring or fall outfit with a print near the neckline, or choose a plain top when you want both upper layers in solid colors.\",\"translation\":\"[纯色选择] 这款开衫有黑色、奶油色、灰色、浅蓝色、海军蓝和粉色可选，均为无印花纯色。春秋穿搭时，可以内搭印花上衣，让图案出现在领口附近；也可以搭配素色上衣，让两层上装都保持纯色。\"},{\"bullet\":5,\"text\":\"[Garment measurements] Size S measures 106 cm at the chest, 63 cm in length and 46 cm at the sleeve; M measures 110 cm at the chest, 64 cm in length and 47 cm at the sleeve. Compare all three measurements with a cardigan you already wear to decide which size is closer to its proportions, rather than choosing by size letter alone.\",\"translation\":\"[成衣尺寸] S 码胸围 106 厘米、衣长 63 厘米、袖长 46 厘米；M 码胸围 110 厘米、衣长 64 厘米、袖长 47 厘米。可以将这三项数据与自己常穿的开衫对照，看看哪个尺码的比例更接近，而不只看尺码字母。\"}],\"warnings\":\"\"}",
+                "reasoning_content": "**Comparing cardigan measurements**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 3878,
+            "completion_tokens_details": {
+              "reasoning_tokens": 3106
+            },
+            "prompt_tokens": 2779,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 6657
+          }
+        },
+        "createdAt": "2026-11-18T07:20:16.532606+00:00",
+        "purpose": "listing_bullet_repair",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "369bf02eda04487fac3e7a3d549e5f24",
+      "originalSha256": "fbd30cfafee2172b64a893a90d1fcb6dbc75de30f7a203353a2f9eb9edcc9576",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_0501c6971ab2ca9f016afd51b32a9c87d0818875761b43b286",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"issues\":[{\"bullet\":2,\"kind\":\"padding\",\"quote\":\"Fasten all five for a closed front\",\"reason\":\"扣上全部纽扣即可闭合门襟是不言自明的用法，可删去这一重复说明。\"},{\"bullet\":3,\"kind\":\"mixed_topic\",\"quote\":\"while ribbed cuffs define where the sleeves end at the wrists\",\"reason\":\"罗纹袖口是可独立介绍的产品特征，偏离了这一条以宽松长袖为主的卖点。\"},{\"bullet\":4,\"kind\":\"padding\",\"quote\":\"each without a printed pattern\",\"reason\":\"标题已说明是纯色选项，“没有印花”只是重复说明。\"}]}",
+                "reasoning_content": "**Flagging redundant pattern wording**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1703,
+            "completion_tokens_details": {
+              "reasoning_tokens": 1552
+            },
+            "prompt_tokens": 1296,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 2999
+          }
+        },
+        "createdAt": "2026-11-18T07:20:49.116641+00:00",
+        "purpose": "listing_bullet_review",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "0fa804839d464e3aa275ca453c5d3464",
+      "originalSha256": "b66f937eb1f06e1faa76580545ce92f1278aeef0ac012761174f8c30cc80e64b",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_04b8dbd8ef998262016afd51d3cacc87d0a509b124b7316888",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"revisions\":[{\"bullet\":2,\"text\":\"[Button front] Five large, round gold-tone buttons run down the single-breasted front. Leave them undone to show a top beneath, fasten just the middle button to leave openings above and below, or close the top two while leaving the lower three open over a tucked-in shirt.\",\"translation\":\"[纽扣门襟] 五颗大号圆形金色调纽扣沿单排扣门襟排列。可以不扣纽扣，露出里面的上衣；只扣中间一颗，让上下两处敞开；也可以扣上方两颗、松开下方三颗，搭配塞进下装的衬衫。\"},{\"bullet\":3,\"text\":\"[Sleeve shape] The cardigan's loose long sleeves create a relaxed outline along the arms. In spring or fall, wear it over a close-fitting long-sleeved top when you want to layer without adding a second loose sleeve. For a milder day, choose a sleeveless top underneath to leave the cardigan as the only layer covering your arms.\",\"translation\":\"[袖型] 开衫的宽松长袖让手臂线条显得舒展。春秋季可以内搭修身长袖上衣，叠穿时不会再增加一层宽松的袖子。天气较暖时，可以内搭无袖上衣，让开衫成为遮盖手臂的唯一一层。\"},{\"bullet\":4,\"text\":\"[Solid-color options] The cardigan comes in Black, Cream, Gray, Light Blue, Navy Blue, and Pink. Wear it over a patterned top to bring print near the neckline in a spring or fall outfit, or pair it with patterned trousers if you want the print below the cardigan. A plain top keeps both upper layers solid.\",\"translation\":\"[纯色选择] 开衫有黑色、奶油色、灰色、浅蓝色、藏蓝色和粉色可选。春秋季可以内搭印花上衣，让图案出现在领口附近；如果想把图案放在开衫下方，可以搭配印花长裤。搭配纯色上衣，则上身两层都是纯色。\"}],\"warnings\":\"\"}",
+                "reasoning_content": "**Refining sleeve rationale**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 3945,
+            "completion_tokens_details": {
+              "reasoning_tokens": 3461
+            },
+            "prompt_tokens": 2158,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 6103
+          }
+        },
+        "createdAt": "2026-11-18T07:22:10.617572+00:00",
+        "purpose": "listing_bullet_repair",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "65c43e349ed345b292bfdde429224741",
+      "originalSha256": "4aa95bc17b9a7af7a43357e1ba7c4c113d103c3fabb6fab58b16d2a3359e2336",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_04ed8a0341b372b8016afd52256b1487d093216ca452772156",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"issues\":[{\"bullet\":3,\"kind\":\"padding\",\"quote\":\"For a milder day, choose a sleeveless top underneath to leave the cardigan as the only layer covering your arms.\",\"reason\":\"无袖内搭后只有开衫覆盖手臂是不言自明的；上一句已说明袖子如何用于叠穿，整句可删。\"},{\"bullet\":4,\"kind\":\"padding\",\"quote\":\"A plain top keeps both upper layers solid.\",\"reason\":\"纯色上衣搭配纯色开衫后，两层都是纯色，属于显而易见的赘述；整句可删。\"}]}",
+                "reasoning_content": "**Flagging a redundant clause**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1489,
+            "completion_tokens_details": {
+              "reasoning_tokens": 1350
+            },
+            "prompt_tokens": 1294,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 2783
+          }
+        },
+        "createdAt": "2026-11-18T07:22:42.403705+00:00",
+        "purpose": "listing_bullet_review",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "037262319f2b412b9bf9d69cdbdb6e62",
+      "originalSha256": "af1415ffb24e7257e29e924b433fdeeb906b7786a9420fbdaf10cf735099d866",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_0efb0b453e068709016afd524509b487d08717d71593b7d507",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"revisions\":[{\"bullet\":3,\"text\":\"[Sleeve shape] The cardigan's loose long sleeves create a relaxed outline along the arms. In spring or fall, wear it over a close-fitting long-sleeved top when you want to layer without adding a second loose sleeve. Ribbed cuffs finish the sleeves at the wrists.\",\"translation\":\"[袖型] 这款开衫的宽松长袖让手臂线条显得舒展。春秋季节可叠穿修身长袖上衣，避免两层宽松袖子叠在一起。罗纹袖口收在手腕处。\"},{\"bullet\":4,\"translation\":\"[纯色选择] 这款开衫有黑色、奶油色、灰色、浅蓝色、藏蓝色和粉色可选。春秋季可以穿在印花上衣外，让图案出现在领口附近；如果想把印花放在开衫下方，可以搭配印花长裤。\"}],\"warnings\":\"\"}",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 1151,
+            "completion_tokens_details": {
+              "reasoning_tokens": 924
+            },
+            "prompt_tokens": 2255,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 3406
+          }
+        },
+        "createdAt": "2026-11-18T07:23:06.255624+00:00",
+        "purpose": "listing_bullet_repair",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    },
+    {
+      "originalReceiptId": "53e733e5668a4878bde535b9ad9128dd",
+      "originalSha256": "7f0a604b831e197c86259ae7f569d6200a6d4d346885316d42c23244f2904650",
+      "record": {
+        "market": "US",
+        "response": {
+          "id": "resp_0168bb1452888296016afd525ce30887d0be4d4cb4db267cda",
+          "model": "gpt-6-sol",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "{\"issues\":[{\"bullet\":3,\"kind\":\"mixed_topic\",\"quote\":\"Ribbed cuffs finish the sleeves at the wrists.\",\"reason\":\"罗纹袖口是可独立成点的产品特征，偏离了宽松长袖的袖型主题。\"}]}",
+                "reasoning_content": "**Reviewing sleeve details**",
+                "role": "assistant"
+              },
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "completion_tokens": 328,
+            "completion_tokens_details": {
+              "reasoning_tokens": 265
+            },
+            "prompt_tokens": 1268,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            },
+            "total_tokens": 1596
+          }
+        },
+        "createdAt": "2026-11-18T07:23:15.352813+00:00",
+        "purpose": "listing_bullet_review",
+        "provider": "Codex Tools",
+        "listingTask": {
+          "jobId": "d6a1ecd964a54cf5b6ccdaf01568e3de",
+          "owner": 2,
+          "productId": "IMP-US-B0HR85GQYF",
+          "inputDigest": "3139a5acc5c85656d2cd46becae6fc46f46af94e60896a43d46b9a37b1f900a7"
+        }
+      }
+    }
+  ],
+  "expectedFinalBulletSha256s": [
+    "9d63327b235dfe5622208115b15c2fae6ee2975f394a1bd3b42eac33001d2d92",
+    "b3c3ede40054bd4b3a095d584fa9ecb9bdab33d1b5d7293b7ce8e49dca822277",
+    "3ce76ca57d9299975b31259092fcbb8598f75017d6fc0131254431c7d4f6f5c4",
+    "74cd5be3ecffc9a6e1dcd868d793e9978432c74ff18e55a2ea766ce42410347e",
+    "d0ca258f8ae88ffa0ad7c2a8095b6f0adcecc62d002611c63494645582058a36"
+  ],
+  "expectedBulletLengths": [
+    255,
+    272,
+    262,
+    263,
+    331
+  ]
+}

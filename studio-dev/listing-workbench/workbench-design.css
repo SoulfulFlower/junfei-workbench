@@ -1,0 +1,117 @@
+:root {
+  --ds-brand:#234d7c;
+  --ds-brand-hover:#193b63;
+  --ds-surface:#fff;
+  --ds-background:#f4f6f9;
+  --ds-soft:#edf2f7;
+  --ds-border:#d8e0e9;
+  --ds-text:#17263a;
+  --ds-secondary:#41536a;
+  --ds-muted:#5d6d80;
+  --ds-success:#216746;
+  --ds-warning:#815319;
+  --ds-danger:#992f37;
+  --ds-space-1:4px;
+  --ds-space-2:8px;
+  --ds-space-3:12px;
+  --ds-space-4:16px;
+  --ds-space-6:24px;
+  --ds-space-8:32px;
+  --ds-control-radius:6px;
+  --ds-panel-radius:8px;
+  --ds-dialog-radius:12px;
+  --ds-overlay-shadow:0 8px 28px #17263a26;
+  --ds-font:'Segoe UI','Microsoft YaHei UI',system-ui,sans-serif;
+}
+
+.ds { color:var(--ds-text); font:14px/22px var(--ds-font); }
+.ds h1,.ds h2,.ds p { margin:0; }
+.ds h1 { font-size:28px; line-height:36px; font-weight:600; }
+.ds h2 { font-size:20px; line-height:28px; font-weight:600; }
+.ds .ds-muted { color:var(--ds-muted); font-size:12px; line-height:18px; }
+.ds-header,.ds-panel-heading,.ds-actions { display:flex; align-items:center; gap:var(--ds-space-3); flex-wrap:wrap; }
+.ds-header,.ds-panel-heading { justify-content:space-between; }
+.ds-panel { background:var(--ds-surface); border:1px solid var(--ds-border); border-radius:var(--ds-panel-radius); }
+.ds-panel-heading { padding:var(--ds-space-4); }
+.ds-button {
+  display:inline-flex; align-items:center; justify-content:center; min-height:36px;
+  padding:var(--ds-space-2) var(--ds-space-3); border:1px solid var(--ds-border); border-radius:var(--ds-control-radius);
+  background:var(--ds-surface); color:var(--ds-text); font:inherit; text-decoration:none; cursor:pointer;
+}
+.ds-button:hover { background:var(--ds-soft); }
+.ds-button-primary { background:var(--ds-brand); border-color:var(--ds-brand); color:white; }
+.ds-button-primary:hover { background:var(--ds-brand-hover); }
+.ds-button:disabled { cursor:default; opacity:.6; }
+.ds-button[hidden] { display:none; }
+.ds :focus-visible { outline:2px solid var(--ds-brand); outline-offset:2px; }
+.ds-table-wrap { overflow-x:auto; }
+.ds-table { width:100%; border-collapse:collapse; text-align:left; font:inherit; }
+.ds-table :is(th,td) { padding:var(--ds-space-2) var(--ds-space-4); height:44px; border-top:1px solid var(--ds-border); }
+.ds-table th { color:var(--ds-secondary); background:var(--ds-background); font-size:12px; }
+.ds-table td:last-child { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.ds-status { color:var(--ds-secondary); white-space:nowrap; }
+.ds-status[data-tone=success] { color:var(--ds-success); }
+.ds-status[data-tone=warning] { color:var(--ds-warning); }
+.ds-status[data-tone=danger] { color:var(--ds-danger); }
+.ds-status[data-tone=active] { color:var(--ds-brand); }
+.ds-feedback { padding:var(--ds-space-4); }
+.ds-feedback[role=alert] { color:var(--ds-danger); }
+.ds-field { display:grid; gap:var(--ds-space-2); }
+.ds-field :is(input,select,textarea) {
+  min-height:36px; min-width:0; padding:var(--ds-space-2) var(--ds-space-3);
+  color:var(--ds-text); background:var(--ds-surface); border:1px solid var(--ds-border); border-radius:var(--ds-control-radius); font:inherit;
+}
+.ds-dialog { padding:var(--ds-space-6); border-radius:var(--ds-dialog-radius); box-shadow:var(--ds-overlay-shadow); }
+
+.workbench-home { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--ds-space-6); min-width:0; }
+.workbench-metrics {
+  display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px;
+  margin:0; padding:0; background:var(--ds-border); overflow:hidden;
+}
+.workbench-metrics div { background:var(--ds-surface); padding:var(--ds-space-4); }
+.workbench-metrics dt { color:var(--ds-secondary); }
+.workbench-metrics dd { margin:var(--ds-space-1) 0 0; font-size:24px; line-height:32px; font-weight:600; font-variant-numeric:tabular-nums; }
+.workbench-metrics dd[data-unavailable] { color:var(--ds-muted); font-size:16px; }
+.workbench-home .ds-panel-heading .ds-button { min-height:32px; }
+.workbench-home .ds-note { margin-top:var(--ds-space-2); }
+.workbench-home .ds-table td:first-child { overflow-wrap:anywhere; }
+.workbench-home .ds-feedback button { margin-left:var(--ds-space-2); }
+.library-product { display:flex; align-items:center; gap:var(--ds-space-3); min-width:180px; }
+.library-photo,.library-photo-empty {
+  flex:none; display:grid; place-items:center; width:80px; height:80px;
+  border:1px solid var(--ds-border); border-radius:var(--ds-control-radius); background:var(--ds-surface);
+  overflow:hidden;
+}
+.library-photo img { width:100%; height:100%; object-fit:contain; }
+#nav button.active { box-shadow:inset 2px 0 var(--ds-brand); }
+#workbenchNavToggle { display:none; }
+body:has(.workbench-home) #chatLauncher { display:none; }
+
+.skills-center { display:grid; gap:var(--ds-space-4); min-width:0; }
+.skills-center .skill-table tbody th { background:var(--ds-surface); color:var(--ds-text); font-size:14px; }
+.skill-table { min-width:680px; table-layout:fixed; }
+.skill-table th:nth-child(1) { width:22%; }
+.skill-table th:nth-child(3) { width:112px; }
+.skill-table th:nth-child(4) { width:64px; }
+.skill-table th:nth-child(5) { width:144px; }
+.skill-table code { display:block; color:var(--ds-muted); font-size:12px; overflow-wrap:anywhere; }
+.skill-table .ds-button { min-height:32px; }
+.skill-io { display:grid; grid-template-columns:max-content 1fr; column-gap:var(--ds-space-2); }
+
+.model-settings { max-width:760px; }
+.model-settings>nav { margin-bottom:var(--ds-space-4); }
+.model-settings>section[hidden] { display:none; }
+.model-settings>section:empty::before { content:'正在读取配置…'; color:var(--ds-muted); }
+.model-settings>section>.panel:first-child { margin-top:0!important; }
+.model-settings [data-model-group][aria-pressed=true] {
+  background:var(--ds-brand); border-color:var(--ds-brand); color:white;
+}
+.model-settings #agentModelSummary { margin:var(--ds-space-3) 0; }
+
+@media(max-width:760px) {
+  .workbench-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .workbench-home { gap:var(--ds-space-4); }
+  #workbenchNavToggle { display:inline-flex; align-self:flex-start; }
+  #workbenchNavToggle[aria-expanded=false]+#nav { display:none; }
+  #workbenchNavToggle[aria-expanded=true]+#nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; }
+}

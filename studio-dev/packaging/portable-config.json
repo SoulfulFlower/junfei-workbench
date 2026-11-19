@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "selection": {
+    "marketplace": "US",
+    "target_count": 1,
+    "strategy": "manual_review",
+    "window_days": 30,
+    "max_per_store_per_day": 2,
+    "store_pool": "outputs/store-pool.csv",
+    "selected_ledger": "outputs/selected-products.csv",
+    "freshness_basis": "sellersprite_product_listing",
+    "brand_policy": {
+      "mode": "generic_only"
+    }
+  },
+  "sourcing": {
+    "platforms": [
+      "1688"
+    ],
+    "require_exact_variant_match": true,
+    "missing_information_policy": "leave_empty_no_fabrication"
+  },
+  "pricing": {
+    "currency": "USD",
+    "method": "unconfigured",
+    "minimum_margin": null
+  },
+  "images": {
+    "enabled": false,
+    "per_product_budget_rmb": 5,
+    "daily_budget_rmb": 200,
+    "gallery_count": 7,
+    "minimum_short_side": 1600,
+    "supplier_image_policy": "requires_review",
+    "codex_tools": {
+      "enabled": false
+    }
+  },
+  "publishing": {
+    "platform": "junfei",
+    "store": "",
+    "marketplace": "US",
+    "quantity": 0,
+    "handling_days": 3,
+    "shipping_template": "",
+    "mode": "draft",
+    "recipe": "junfei-publisher/recipe.json"
+  },
+  "profiles": {},
+  "defaults": {
+    "profile": null,
+    "image_generation": "disabled",
+    "listing_mode": "draft",
+    "publish_requires_per_task_authorization": true
+  },
+  "execution": {
+    "max_attempts": 2,
+    "scheduled": false
+  },
+  "browser": {
+    "engine": "ego-lite",
+    "cli": "",
+    "task_space_id": null,
+    "task_space_name": "",
+    "pages": {},
+    "script_directory": "",
+    "fallback_to_edge": false,
+    "erp_account_bindings": {},
+    "erp_library_bindings": {}
+  },
+  "discovery_browser": {
+    "engine": "ego-lite",
+    "cli": "",
+    "account_bindings": {}
+  }
+}

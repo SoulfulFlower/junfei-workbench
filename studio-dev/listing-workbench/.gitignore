@@ -1,0 +1,6 @@
+data/
+__pycache__/
+
+.deploy-venv/
+
+visual-ui/node_modules/

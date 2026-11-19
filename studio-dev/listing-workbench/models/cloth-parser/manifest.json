@@ -1,0 +1,16 @@
+{
+  "revision": "rembg-v0.0.0-u2net-cloth-seg",
+  "upstream": "https://github.com/levindabhi/cloth-segmentation",
+  "onnxRelease": "https://github.com/danielgatis/rembg/releases/tag/v0.0.0",
+  "file": "u2net_cloth_seg.onnx",
+  "url": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_cloth_seg.onnx",
+  "bytes": 176194565,
+  "sha256": "6d2cbc27bfbdc989e1fd325656d65902ecc6a3ccbe94b2d3655ec114efcb128e",
+  "upstreamMd5": "2434d1f3cb744e0e49386c906e5a08bb",
+  "classes": ["background", "upper", "lower", "full"],
+  "inputSize": [768, 768],
+  "mean": [0.485, 0.456, 0.406],
+  "std": [0.229, 0.224, 0.225],
+  "license": "MIT (clothing model); Apache-2.0 (U2Net architecture)",
+  "purpose": "Offline automatic clothing selection only; no image generation and no provider API"
+}

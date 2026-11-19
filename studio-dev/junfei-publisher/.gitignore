@@ -1,0 +1,11 @@
+node_modules/
+__pycache__/
+junfei-output/
+run-output/
+brain-state/
+
+jobs/
+local-extensions/
+
+ziniao-integration/.venv/
+ziniao-integration/*.local.json

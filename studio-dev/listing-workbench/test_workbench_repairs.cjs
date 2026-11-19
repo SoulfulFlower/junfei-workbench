@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const script=fs.readFileSync(__dirname+'/agent-center.js','utf8');
+const start=script.indexOf('function agentImageTaskPanel('),end=script.indexOf('\nfunction ',start+25);
+const context={esc:s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))};
+vm.createContext(context);vm.runInContext(script.slice(start,end),context);
+assert.match(context.agentImageTaskPanel([]),/暂无/);
+const job={id:'local-id',productId:'own',productName:'<img src=x onerror=alert(1)>',color:'Beige',local:true,statusLabel:'本地换色中',completed:2,total:7,canPause:true,canResume:false};
+const active=context.agentImageTaskPanel([job]);
+assert.match(active,/质检通过 2\/7/);assert.match(active,/data-image-control="pause"/);assert.doesNotMatch(active,/data-image-control="resume"|<img/);
+const paused=context.agentImageTaskPanel([{...job,canPause:false,canResume:true,error:'<script>bad</script>'}]);
+assert.match(paused,/data-image-control="resume"/);assert.doesNotMatch(paused,/<script>|data-image-control="pause"/);
+const api=context.agentImageTaskPanel([{...job,local:false,canPause:false}]);
+assert.doesNotMatch(api,/data-image-control=/);assert.match(api,/API换色记录/);
+console.log('PASS: image task controls, progress, empty state and escaped ledger text');

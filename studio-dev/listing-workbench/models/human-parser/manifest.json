@@ -1,0 +1,16 @@
+{
+  "revision": "61f4ff3c508b899904e495cefbbaff9cacadeb45",
+  "upstream": "https://github.com/PeikeLi/Self-Correction-Human-Parsing",
+  "onnxRepository": "https://huggingface.co/pirocheto/schp-atr-18",
+  "file": "schp-atr-18-int8-static.onnx",
+  "url": "https://huggingface.co/pirocheto/schp-atr-18/resolve/61f4ff3c508b899904e495cefbbaff9cacadeb45/onnx/schp-atr-18-int8-static.onnx",
+  "bytes": 69141996,
+  "sha256": "4420d8db8c1f266967c89485786b01209f6d405f320fc0f87e8ced49392cefb5",
+  "classes": ["Background", "Hat", "Hair", "Sunglasses", "Upper-clothes", "Skirt", "Pants", "Dress", "Belt", "Left-shoe", "Right-shoe", "Face", "Left-leg", "Right-leg", "Left-arm", "Right-arm", "Bag", "Scarf"],
+  "inputSize": [512,512],
+  "channelOrder": "BGR",
+  "mean": [0.406,0.456,0.485],
+  "std": [0.225,0.224,0.229],
+  "license": "MIT",
+  "purpose": "Local body/accessory protection for automatic clothing selection; no external image request"
+}

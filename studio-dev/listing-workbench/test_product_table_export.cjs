@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const file=fs.readFileSync(__dirname+'/import.js','utf8');
+const code=file.slice(file.indexOf('const productTableSelection='));
+const context={drawRows(){},state:{products:[{id:'p1'},{id:'p2'}]},signedUser:{id:1}};
+vm.createContext(context);vm.runInContext(code,context);
+vm.runInContext("syncProductTableSelection();productTableSelection.add('p1');productTableSelection.add('deleted');syncProductTableSelection()",context);
+assert.equal(vm.runInContext('productTableSelection.size',context),1);
+context.signedUser={id:2};context.syncProductTableSelection();
+assert.equal(vm.runInContext('productTableSelection.size',context),0);
+console.log('Product export selection: deleted products removed and selection cleared on account change.');

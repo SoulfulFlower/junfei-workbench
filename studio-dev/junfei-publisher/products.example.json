@@ -1,0 +1,30 @@
+[
+  {
+    "id": "sample-shirt",
+    "store": "潘飞娜护照北美",
+    "marketplace": "美国",
+    "currency": "USD",
+    "parentSku": "PFNHZBM-SAMPLE-001",
+    "brand": "Generic",
+    "title": "REPLACE_WITH_REAL_PRODUCT_TITLE",
+    "highlight": "REPLACE_WITH_REAL_HIGHLIGHT",
+    "bullets": ["真实卖点1", "真实卖点2", "真实卖点3", "真实卖点4", "真实卖点5"],
+    "description": "填写完整产品描述、参数、包装内容和注意事项",
+    "searchTerms": "replace with real search terms",
+    "sourceUrl": "https://detail.1688.com/offer/REPLACE_WITH_REAL_ID.html",
+    "shippingTemplate": "填写实际FBM运费模板名称",
+    "handlingDays": 3,
+    "variants": [
+      {
+        "sku": "PFNHZBM-SAMPLE-001-Black-M",
+        "color": "Black",
+        "size": "Medium",
+        "quantity": 88,
+        "costRmb": 43,
+        "weightGrams": 390,
+        "mainImage": "images/black-main.jpg",
+        "images": ["images/black-detail.jpg", "images/size-chart.jpg"]
+      }
+    ]
+  }
+]

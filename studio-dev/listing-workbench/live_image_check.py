@@ -1,0 +1,11 @@
+import json,sqlite3,time,uuid
+from pathlib import Path
+import visual_studio as v,studio_bridge as bridge
+s=json.loads(sqlite3.connect('data/studio.sqlite3').execute('select body from workspace where id=1').fetchone()[0]);product=s['products'][0];ref=product['sourceImport']['supplier']['images'][0]
+plan={'identity':'Navy hooded jacket, front partly open, visible brownish lining, central zipper, zip chest pocket and two lower zip pockets, sleeve patch and chest embroidery. Preserve the exact cut, seams, hood, zipper positions and original garment markings. The floating flame badge is a source marketing overlay, not part of the garment.','palette':['#FFFFFF','#F4F5F7','#182536','#D2D5DA','#808890'],'lighting':'Soft neutral studio light','typography':'No added text','audience':'Unspecified','warnings':['人工设置的单张生图测试方案，非AI整套策划。','原图约220像素，无法验证微小标识文字；成图须人工核对，不应宣称像素级一致。'], 'slots':[{'index':0,'question':'产品整体外观是什么？','evidence':'1688采集的藏青色连帽夹克原图；只保留产品可见外观。','composition':'Faithfully isolate the exact same navy hooded jacket onto a pure white background. Keep identical opening, lining, pockets, original garment patches and embroidery positions. Remove ONLY the floating flame badge at upper right and source background. No invented glyphs, no replacement logos, no added garment details. Full garment with sleeves visible and 8 percent margin, square studio catalogue photo, natural soft contact shadow. Do not invent a back view. No text overlays, no flames, no heat claims.','headline':'','caption':'','purpose':'白底图真实接口测试'}]}
+p={'id':uuid.uuid4().hex,'productId':product['id'],'references':[ref],'brief':'人工单张白底图测试；保留原衣外观，删除浮动火焰营销图标','created':time.time(),'plan':v.validate_plan(plan,1),'confirmed':True,'deliverable':'gallery','language':'en'}
+p['uiPlan']=bridge.native(p,[]);p['uiPlan']['planner']='manual';p['uiPlan']['story']='单张测试：未执行AI整套策划';v.save_project(p)
+print('PROJECT',p['id'],flush=True)
+r=v.generate({'id':p['id'],'slot':0,'autoRepair':False,'model':'gemini-3-pro-image-preview','size':'1:1','resolution':'2K'})
+Path('data/live-check/image-run.json').write_text(json.dumps({'projectId':p['id'],'runId':r['id'],'productId':product['id']}),encoding='utf-8')
+print('RUN',r['id'],r['status'],flush=True)

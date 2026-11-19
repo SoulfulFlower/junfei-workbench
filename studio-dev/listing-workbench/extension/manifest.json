@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "钧飞跨境 · 商品采集",
+  "version": "0.7.14",
+  "description": "采集Amazon观察、复制商品主图至剪贴板并粘贴到1688搜索框。",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "downloads",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:18765/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    },
+    "default_title": "钧飞跨境 · 采集到工作台"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
+}

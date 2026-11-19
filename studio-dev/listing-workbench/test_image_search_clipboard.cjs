@@ -1,0 +1,10 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const manifest=JSON.parse(fs.readFileSync(__dirname+'/extension/manifest.json','utf8'));
+const popup=fs.readFileSync(__dirname+'/extension/popup.js','utf8');
+assert.ok(manifest.permissions.includes('clipboardWrite'));
+assert.match(popup,/navigator\.clipboard\.write\(\[new ClipboardItem\(\{'image\/png':png\}\)\]\)/);
+assert.match(popup,/chrome\.tabs\.create\(\{url:'https:\/\/s\.1688\.com\/'\}\)/);
+assert.match(popup,/Ctrl\+V/);
+assert.doesNotMatch(popup,/opener\.click\(\)/);
+assert.doesNotMatch(popup,/querySelectorAll\('input\[type="file"\]'\)/);
+console.log('1688 image-search clipboard flow checks passed');
