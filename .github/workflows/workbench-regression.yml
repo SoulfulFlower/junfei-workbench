@@ -14,9 +14,12 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      JUNFEI_ACCOUNT_DATA: ${{ runner.temp }}/junfei-account
-      NUMBA_CACHE_DIR: ${{ runner.temp }}/junfei-numba
     steps:
+      - name: Initialize isolated runtime paths
+        shell: pwsh
+        run: |
+          "JUNFEI_ACCOUNT_DATA=$env:RUNNER_TEMP/junfei-account" >> $env:GITHUB_ENV
+          "NUMBA_CACHE_DIR=$env:RUNNER_TEMP/junfei-numba" >> $env:GITHUB_ENV
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:

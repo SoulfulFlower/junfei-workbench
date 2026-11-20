@@ -1,8 +1,11 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -159,6 +162,27 @@ class PortableBuildTests(unittest.TestCase):
         build.prepare_stage(self.stage, self.root)
         with self.assertRaises(FileExistsError):
             build.prepare_stage(self.stage, self.root)
+
+    def test_corresponding_source_cli_runs_from_extracted_archive(self):
+        archive_path = Path(self.temp.name) / 'corresponding-source.zip'
+        build.create_source_archive(archive_path, build.ROOT)
+        extracted = Path(self.temp.name) / 'extracted-source'
+        with zipfile.ZipFile(archive_path) as archive:
+            for name in ('pipeline.py', 'codex_workbench.py', 'pipeline_delivery.py', 'config.example.json'):
+                relative = 'automation/' + name
+                self.assertEqual(archive.read(relative), (build.ROOT / relative).read_bytes())
+            archive.extractall(extracted)
+        env = {key: value for key, value in os.environ.items() if key != 'PYTHONPATH'}
+        env['PYTHONDONTWRITEBYTECODE'] = '1'
+        for script in ('pipeline.py', 'codex_workbench.py'):
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, '-B', '-X', 'utf8', str(extracted / 'automation' / script), '--help'],
+                    cwd=extracted, env=env, capture_output=True, text=True, encoding='utf-8', timeout=20,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('usage:', result.stdout.lower())
+        self.assertFalse((extracted / 'automation/data').exists())
 
     def test_corresponding_source_covers_packaged_binary_assets(self):
         for name in ('assets/favicon.png', 'extension/logo.png'):
