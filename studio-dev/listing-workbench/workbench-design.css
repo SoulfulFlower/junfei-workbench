@@ -31,6 +31,7 @@
 .ds .ds-muted { color:var(--ds-muted); font-size:12px; line-height:18px; }
 .ds-header,.ds-panel-heading,.ds-actions { display:flex; align-items:center; gap:var(--ds-space-3); flex-wrap:wrap; }
 .ds-header,.ds-panel-heading { justify-content:space-between; }
+.ds-actions { gap:var(--ds-space-2); }
 .ds-panel { background:var(--ds-surface); border:1px solid var(--ds-border); border-radius:var(--ds-panel-radius); }
 .ds-panel-heading { padding:var(--ds-space-4); }
 .ds-button {
@@ -44,7 +45,7 @@
 .ds-button:disabled { cursor:default; opacity:.6; }
 .ds-button[hidden] { display:none; }
 .ds :focus-visible { outline:2px solid var(--ds-brand); outline-offset:2px; }
-.ds-table-wrap { overflow-x:auto; }
+.ds-table-wrap { max-width:100%; overflow-x:auto; }
 .ds-table { width:100%; border-collapse:collapse; text-align:left; font:inherit; }
 .ds-table :is(th,td) { padding:var(--ds-space-2) var(--ds-space-4); height:44px; border-top:1px solid var(--ds-border); }
 .ds-table th { color:var(--ds-secondary); background:var(--ds-background); font-size:12px; }
@@ -87,8 +88,9 @@
 #workbenchNavToggle { display:none; }
 body:has(.workbench-home) #chatLauncher { display:none; }
 
-.skills-center { display:grid; gap:var(--ds-space-4); min-width:0; }
+.skills-center { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--ds-space-4); min-width:0; }
 .skills-center .skill-table tbody th { background:var(--ds-surface); color:var(--ds-text); font-size:14px; }
+.skills-center .ds-panel { min-width:0; }
 .skill-table { min-width:680px; table-layout:fixed; }
 .skill-table th:nth-child(1) { width:22%; }
 .skill-table th:nth-child(3) { width:112px; }
@@ -114,4 +116,64 @@ body:has(.workbench-home) #chatLauncher { display:none; }
   #workbenchNavToggle { display:inline-flex; align-self:flex-start; }
   #workbenchNavToggle[aria-expanded=false]+#nav { display:none; }
   #workbenchNavToggle[aria-expanded=true]+#nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); overflow:visible; }
+}
+
+/* Shared workbench controls, including the React editor embedded in the shell. */
+body { font-family:var(--ds-font); }
+.app > main > .content { padding:var(--ds-space-6) var(--ds-space-6) calc(2 * var(--ds-space-8)); }
+.content :is(.titlebar,.toolbar,.actions,.pe-actions), dialog .actions {
+  display:flex; align-items:center; flex-wrap:wrap; gap:var(--ds-space-2);
+}
+.content .titlebar { justify-content:space-between; gap:var(--ds-space-4); margin-bottom:var(--ds-space-6); }
+.content .titlebar h1 { font-size:28px; line-height:36px; }
+.content .titlebar p { margin-top:var(--ds-space-1); }
+.content :is(.panel,.ds-panel), .stats .stat { border-radius:var(--ds-panel-radius); }
+.content .panel.box,.content .stats .stat { padding:var(--ds-space-4); }
+.content .panel.box h2 { margin-bottom:var(--ds-space-4); }
+.content .stats { gap:var(--ds-space-4); margin-bottom:var(--ds-space-6); }
+.content .toolbar { padding:var(--ds-space-4); justify-content:space-between; }
+.content .tablewrap { overflow-x:auto; }
+.content .tablewrap :is(th,td) { padding:var(--ds-space-2) var(--ds-space-4); }
+.btn, .ds-button, .pe-shell .pe-card button, .pe-shell .pe-next {
+  min-height:36px; gap:var(--ds-space-2); border-radius:var(--ds-control-radius);
+}
+.btn { display:inline-flex; align-items:center; justify-content:center; font-family:inherit; }
+.btn.primary, .ds-button-primary { background:var(--ds-brand); border-color:var(--ds-brand); color:white; }
+.btn.primary:hover, .ds-button-primary:hover { background:var(--ds-brand-hover); }
+.btn.danger, .btn[data-tone=danger] { color:var(--ds-danger); border-color:var(--ds-danger); }
+.btn:disabled, .ds-button:disabled { opacity:.55; cursor:not-allowed; }
+:where(.content,dialog,.app>aside,#loginScreen) :is(button,a,input,select,textarea,summary):focus-visible {
+  outline:2px solid var(--ds-brand); outline-offset:2px;
+}
+:where(.content,dialog,#loginScreen) :is(input:not([type=checkbox],[type=radio],[type=file]),select) {
+  min-height:36px; max-width:100%; border-radius:var(--ds-control-radius);
+}
+:where(.content,dialog) textarea { border-radius:var(--ds-control-radius); }
+#modal { border-radius:var(--ds-dialog-radius); }
+#newform { display:grid; gap:var(--ds-space-4); margin-top:var(--ds-space-4); }
+#newform label { display:grid; gap:var(--ds-space-2); }
+#newform .ds-note { margin:calc(-1 * var(--ds-space-2)) 0 0; color:var(--ds-muted); font-size:12px; }
+#newform .actions { justify-content:flex-end; margin:0; }
+#newform .form-error { margin:0; color:var(--ds-danger); }
+#newform .form-error:empty { display:none; }
+.page-actions { position:relative; }
+.page-actions > summary { list-style:none; }
+.page-actions > summary::-webkit-details-marker { display:none; }
+.page-actions > summary::after { content:'▾'; color:var(--ds-muted); }
+.page-actions-menu {
+  position:absolute; z-index:5; inset:calc(100% + var(--ds-space-1)) 0 auto auto;
+  display:grid; gap:var(--ds-space-1); padding:var(--ds-space-2); min-width:max-content;
+  background:var(--ds-surface); border:1px solid var(--ds-border); border-radius:var(--ds-panel-radius);
+  box-shadow:var(--ds-overlay-shadow);
+}
+.page-actions-menu .btn { justify-content:flex-start; }
+#workspaceConflict { margin-bottom:var(--ds-space-4); border-color:var(--ds-warning); }
+#workspaceConflict .actions { margin-top:var(--ds-space-2); }
+@media(max-width:760px) {
+  .app > main > .content { padding:var(--ds-space-4) var(--ds-space-4) calc(2 * var(--ds-space-8)); }
+  .content .titlebar { margin-bottom:var(--ds-space-4); }
+  .content .titlebar h1 { font-size:24px; line-height:32px; }
+  .content .toolbar { gap:var(--ds-space-3); }
+  .content .stats { gap:var(--ds-space-2); margin-bottom:var(--ds-space-4); }
+  .btn,.ds-button,.pe-shell .pe-card button { min-height:40px; }
 }

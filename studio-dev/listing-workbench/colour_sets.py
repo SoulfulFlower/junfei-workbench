@@ -599,11 +599,13 @@ def start_worker():
   if any(i['status']=='submitting' for i in s['items']):s.update(status='needs_attention',error='上次提交状态不明，请核对服务商任务，未自动重提');save(s)
  threading.Thread(target=loop,daemon=True).start()
 
-def image_bytes(sid,slot):
+def image_bytes(sid,slot,*,local_only=False):
  s=get(sid);item=next((i for i in s['items'] if i['slot']==slot),None)
  if not item or not item.get('image'):raise ValueError('该换色图片尚未完成')
  # Reuse the existing provider-image download protections and local cache via a private run.
  rid=uuid.uuid5(uuid.NAMESPACE_URL,'junfei-colour:'+sid+':'+str(slot)+':'+item['image']).hex
+ if local_only:
+  return studio_bridge.result_bytes({'id':rid,'productId':s['productId'],'image':item['image']},local_only=True)
  try:visual.get_run(rid)
  except ValueError:visual.save_run({'id':rid,'projectId':'colour:'+sid,'productId':s['productId'],'slot':slot,'image':item['image'],'status':'colour_cache','mode':'colour_cache','qc':[]})
  return studio_bridge.result_image(rid)

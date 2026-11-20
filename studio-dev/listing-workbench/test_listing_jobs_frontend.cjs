@@ -14,10 +14,11 @@ function harness(){
   state:structuredClone(stored),activeListingGeneration:new Map(),view:'products',selected:'P',market:'US',
   listingTextProvider:'Fixture',listingFields:[['title','Title']],
   render(){},mountListingProgress(){},updateListingCopyActions(){},syncLabel(){},toast(){},
+  acceptWorkspace(data){ctx.state=data.state;ctx.serverRevision=data.revision},
   flushWorkspace:async()=>{},listingBatchReason:()=>'',confirm:()=>true,initServer:async()=>true,
   fetch:async(url,opts={})=>{
    calls.push({url,method:opts.method||'GET',data:opts.body&&JSON.parse(opts.body)});
-   if(url==='/api/state')return {ok:true,json:async()=>({revision,state:structuredClone(stored)})};
+   if(url==='/api/state?readOnly=1')return {ok:true,json:async()=>({revision,state:structuredClone(stored)})};
    if(url.endsWith('/start'))return {ok:true,json:async()=>({job:structuredClone(job)})};
    if(url.endsWith('/list'))return {ok:true,json:async()=>({jobs:[structuredClone(job)]})};
    if(url.includes('/status?')){
@@ -39,7 +40,7 @@ test('default generation starts one durable task and never POSTs its result to w
  assert.equal(ctx.state.copy['P-US'].title,'Generated on server');
  const starts=calls.filter(c=>c.url.endsWith('/start'));
  assert.equal(starts.length,1);
- assert.deepEqual(starts[0].data,{productId:'P',market:'US',requestId:'request-12345',expectedRevision:1});
+ assert.deepEqual(starts[0].data,{productId:'P',market:'US',requestId:'request-12345',expectedRevision:1,confirmPaidText:true});
  assert.equal(calls.some(c=>c.url==='/api/generate/listing'),false);
  assert.equal(calls.some(c=>c.url==='/api/state'&&c.method==='POST'),false);
 });

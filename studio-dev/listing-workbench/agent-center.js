@@ -1,6 +1,5 @@
 /* Account-scoped task center. Fixed tools; model plans never become executable code. */
 names.agent='任务中心';
-const agentPreviousRender=render;
 let agentEpoch=0,agentTimer=null,agentSelectedTask=null;
 const agentLabels={queued:'待开始',running:'执行中',paused:'已暂停',blocked:'待补齐',needs_review:'需核对',erp_pending:'ERP回执待核对',library_ready:'待存入钧飞',inspection_done:'检查完成',done:'已完成'};
 const agentStages={plan:'任务规划',facts:'选品与货源',research:'竞品关键词',listing:'Listing文案',images:'商品图片',export:'交付导出',junfeiPreflight:'钧飞本地预检',publish:'钧飞刊登',verify:'在售核对'};
@@ -89,15 +88,9 @@ async function agentApi(path,data){
  const response=await fetch('/api/agent/'+path,data===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
  const result=await response.json();if(!response.ok)throw Error(result.error||'请求失败');return result;
 }
-render=function(){
- clearTimeout(agentTimer);agentEpoch++;
- if(view!=='agent')return agentPreviousRender();
- const old=renderGuide;renderGuide=renderAgentCenter;
- try{view='guide';agentPreviousRender()}finally{view='agent';renderGuide=old}
- renderNavigation();
-};
 function renderAgentCenter(){
- const epoch=agentEpoch;
+ clearTimeout(agentTimer);
+ const epoch=++agentEpoch;
  document.getElementById('content').innerHTML='<div class="agent-center">'+title('智能体任务中心','选择店铺、站点和产品，创建检查或交付任务', '<button class="btn" id="agentRefresh">刷新任务</button>')+`
  <div class="notice">现有成品可选择正式ERP草稿交付，使用交付页相同的账号目标、原始文件和采集回执。检查及研究任务继续保留；本页不自动生图或发布。</div>
  <div class="notice" id="publicationFollowup" hidden></div>
@@ -328,8 +321,10 @@ async function agentDraftDialog(task){
    adopt.disabled=true;
    try{
     await flushWorkspace();
+    const owner=signedUser,snapshot=structuredClone(state);
     const result=await agentApi('adopt-listing',{id:task.id});
-    state=result.state;serverRevision=result.revision;
+    if(signedUser!==owner||!serverReady)return;
+    if(!syncBusy&&!syncConflict&&result.revision>=serverRevision)acceptWorkspace(result,snapshot);
     modal.close();openListingWorkspace(task.productId,'copy');toast('草稿已采用，请审核；审核后返回任务台更新资料重检');
    }catch(error){toast(error.message)}finally{adopt.disabled=false}
   };
@@ -342,10 +337,10 @@ async function agentSourcingDialog(task){
 async function agentSyncResearchState(tasks,epoch){
  if(!tasks.some(t=>(t.workspaceRevision||0)>serverRevision)||syncBusy||syncPending||syncConflict)return;
  const before=JSON.stringify(state);
- const response=await fetch('/api/state');if(!response.ok)return;
+ const response=await fetch('/api/state?readOnly=1');if(!response.ok)return;
  const data=await response.json();
  if(epoch!==agentEpoch||view!=='agent'||syncBusy||syncPending||syncConflict||JSON.stringify(state)!==before)return;
- if(data.state&&data.revision>serverRevision){state=data.state;serverRevision=data.revision;syncLabel('智能体研究结果已同步');}
+ if(data.state&&data.revision>serverRevision){acceptWorkspace(data,state);syncLabel('智能体研究结果已同步');}
 }
 async function agentSetResearchAsins(task,epoch){
  const modal=document.getElementById('modal');

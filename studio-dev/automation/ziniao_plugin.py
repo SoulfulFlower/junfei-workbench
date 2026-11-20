@@ -78,9 +78,9 @@ def check_identity(page, market, seller, account):
     if page.get('url') != POPUP:
         return False
     text = page['content']
-    if not re.search(r'站点\s+\S+\s+店铺\s+\S+\s+版本号', text):
+    identity = re.search(r'站点\s+(\S+)\s+店铺\s+(.+?)\s+版本号', text)
+    if identity is None:
         return False
-    identity=re.search(r'站点\s+(\S+)\s+店铺\s+(.+?)\s+版本号',text)
     if identity.group(2) != seller:
         raise ValueError('插件实际店铺与当前任务不符；未继续 ERP 操作')
     if identity.group(1) != COUNTRIES[market]:

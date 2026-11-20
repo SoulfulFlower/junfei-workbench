@@ -72,7 +72,18 @@ class EligibilityTests(unittest.TestCase):
                 patch.object(erp.generated_gallery,'export_images',return_value=images), \
                 patch.object(erp.colour_sets,'list_sets',return_value={'sets':[]}), \
                 patch.object(erp.inputs,'transport',return_value={}):
+            packet=erp.preflight(2,self.product,self.listing,self.destination,None)
+            erp.generated_gallery.export_images.assert_called_with(self.product,'current',local_only=True)
+            self.assertFalse((self.root/'media').exists())
             snapshot=erp.finished_snapshot(2,self.product,self.listing,self.destination,self.root/'media')
+            self.assertEqual(erp.review_digest(packet),erp.review_digest(erp.review_packet(snapshot)))
+            images=packet['variants']['P-Red-M']['images']
+            self.assertEqual([image['slot'] for image in images],list(range(7)))
+            changed=copy.deepcopy(packet)
+            changed['variants']['P-Red-M']['price']='99'
+            self.assertNotEqual(erp.review_digest(packet),erp.review_digest(changed))
+            images.reverse()
+            self.assertNotEqual(erp.review_digest(packet),erp.review_digest(erp.review_packet(snapshot)))
         self.assertEqual([row['sku'] for row in snapshot['goodsItems']],['P-Red-M'])
         self.assertEqual(snapshot['goodsItems'][0]['sourceAsin'],'B000000002')
         self.assertEqual(snapshot['goodsItems'][0]['imageIndices'],list(range(7)))

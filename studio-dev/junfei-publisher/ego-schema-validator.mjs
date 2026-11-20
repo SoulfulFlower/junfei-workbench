@@ -14,7 +14,8 @@ export function validateSchemaAttributes(meta,records,input){
  if(typeof meta?.hash!=='string'||!meta.hash.trim())throw failure('缺少实际类目 schema 标识');
  let schema;try{schema=typeof meta.schema_content==='string'?JSON.parse(meta.schema_content):meta.schema_content;}catch{throw failure('类目 schema 不是有效 JSON');}
  if((typeof schema!=='object'||schema===null||Array.isArray(schema))&&typeof schema!=='boolean')throw failure('缺少实际类目 schema');
- const processResult=spawnSync(executable,['-X','utf8',helper],{input:JSON.stringify({schema,records}),encoding:'utf8',shell:false,windowsHide:true,timeout:20000,maxBuffer:2*1024*1024});
+ const args=input.runtime.bundledValidator===true?['--workbench-tool','validate-attributes']:['-X','utf8',helper];
+ const processResult=spawnSync(executable,args,{input:JSON.stringify({schema,records}),encoding:'utf8',shell:false,windowsHide:true,timeout:20000,maxBuffer:2*1024*1024});
  if(processResult.error){if(processResult.error.code==='ETIMEDOUT')throw failure('本地检查超时，未继续保存或发布');throw failure('无法启动指定的本地验证运行环境');}
  let result;try{result=JSON.parse(processResult.stdout);}catch{throw failure('本地验证没有返回有效检查回执');}
  const proof={passed:result.passed===true,checkedCount:result.checkedCount,schemaHash:meta.hash,

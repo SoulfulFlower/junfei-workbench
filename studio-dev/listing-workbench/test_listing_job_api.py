@@ -47,7 +47,8 @@ class ListingJobAPITests(unittest.TestCase):
         return status,json.loads(raw) if response.getheader('Content-Type','').startswith('application/json') else raw
 
     def start(self):
-        return self.call('/api/listing-jobs/start',{'productId':'P','market':'US','requestId':'request-api-1','expectedRevision':1})
+        return self.call('/api/listing-jobs/start',{'productId':'P','market':'US','requestId':'request-api-1',
+                                                   'expectedRevision':1,'confirmPaidText':True})
 
     def test_authentication_account_header_and_product_input_boundary(self):
         with patch.object(server.accounts,'identify',return_value=None):

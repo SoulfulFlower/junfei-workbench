@@ -11,15 +11,21 @@ function render(job,{online=true,busy=false}={}){
   const states=[data,'us','',busy,'UK','template','brand','8.19','88','3',false,false],requests=[],prepares=[],saves=[];
   let index=0;const react={useState:()=>{const i=index++;return [states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];},useRef:value=>({current:value}),useEffect:()=>{}};
   const exports={};new Function('require','exports',source)(name=>name==='react'?react:require('./visual-ui/node_modules/'+name),exports);
-  const previousFetch=global.fetch;
+  const previousFetch=global.fetch,previousWindow=global.window;
   global.fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({job:{...job,status:'queued'}})};};
+  global.window={confirmPublicationOperation:async(account,action,request)=>{
+    const response=await global.fetch('/api/publication/'+action,{
+      headers:{'X-Workspace-Account':String(account)},body:JSON.stringify(request)
+    });
+    return response.json();
+  }};
   const tree=exports.default({productId:'ribbed',accountId:2,online,beforeStart:async()=>{prepares.push(true);},saveCommerce:async details=>{saves.push(details);}});
   function all(node){if(!node||typeof node!=='object')return [];return [node,...[node.props?.children].flat(Infinity).flatMap(all)];}
   function text(node){if(Array.isArray(node))return node.map(text).join('');if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);return text(node.props?.children);}
   const nodes=all(tree);
   return {requests,prepares,saves,states,text:text(tree),find:id=>nodes.find(node=>node.props?.id===id),
     primary:nodes.find(node=>node.type==='button'&&node.props.className==='pe-primary'),
-    checkboxes:nodes.filter(node=>node.type==='input'&&node.props.type==='checkbox'),restore:()=>{global.fetch=previousFetch;}};
+    checkboxes:nodes.filter(node=>node.type==='input'&&node.props.type==='checkbox'),restore:()=>{global.fetch=previousFetch;global.window=previousWindow;}};
 }
 async function click(button){assert.ok(button);button.props.onClick();await new Promise(setImmediate);}
 
@@ -32,7 +38,7 @@ test('explicit media recovery sends only original job ID plus retry action',asyn
   }finally{view.restore();}
 });
 
-test('ordinary continuation requires no new consent and creates no recovery action',async()=>{
+test('ordinary continuation asks for confirmation of the original checkpoint',async()=>{
   const view=render(failed());try{
     assert.equal(view.primary.props.disabled,false);await click(view.primary);
     assert.equal(view.requests.length,1);assert.equal(view.requests[0].url,'/api/publication/continue');
@@ -55,8 +61,8 @@ test('submitted original task observation is a separate read action without save
   const view=render(job);try{
     const button=view.find('wbObservePublicationReceipts');assert.equal(button.props.disabled,false);assert.equal(view.primary,undefined);
     await click(button);assert.equal(view.prepares.length,0);assert.equal(view.saves.length,0);assert.equal(view.requests.length,1);
-    assert.deepEqual(JSON.parse(view.requests[0].options.body),{id:'original',confirmed:true,observeOnly:true});
-    assert.equal(view.requests[0].url,'/api/publication/continue');
+    assert.deepEqual(JSON.parse(view.requests[0].options.body),{id:'original'});
+    assert.equal(view.requests[0].url,'/api/publication/observe');
   }finally{view.restore();}
 });
 
