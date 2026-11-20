@@ -133,6 +133,10 @@ class CollectionTests(unittest.TestCase):
             self.assertIsNone(erp.browser_preflight_failure(script,output,'app'))
 
     def test_bootstrap_failure_keeps_original_job_and_reports_proven_import_boundary(self):
+        adapters=self.root/'automation'
+        adapters.mkdir(exist_ok=True)
+        for script in ('ego_browser.py','ziniao_plugin.py'):
+            (adapters/script).touch()
         with patch.object(erp,'destinations',return_value=[self.destination]),patch.object(erp.threading,'Thread'):
             first=erp.start(2,self.workspace,{'productId':'P','destinationId':'store'})
         job=erp.owned(2,first['id'])

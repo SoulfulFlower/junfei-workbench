@@ -41,6 +41,7 @@ def catalog():
         'label': 'Codex 工作流',
         'skills': [
             {'id': key, 'name': name, 'input': inputs, 'output': outputs, 'mode': 'codex',
+             'bundled': (Path(__file__).resolve().parents[2] / '.agents' / 'skills' / key / 'SKILL.md').is_file(),
              'installed': (codex_home / 'skills' / key / 'SKILL.md').is_file(), 'invocation': '$' + key}
             for key, name, inputs, outputs in CODEX_SKILLS
         ],

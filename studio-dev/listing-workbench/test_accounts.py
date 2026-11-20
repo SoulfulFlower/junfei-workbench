@@ -38,6 +38,36 @@ class AccountTests(unittest.TestCase):
         with r:
             return r.status,json.load(r),r.headers
 
+    def test_workspace_changes_save_independently_and_reject_stale_record(self):
+        credentials = {'username': 'admin', 'name': '示例用户', 'password': 'administrator-test-123'}
+        accounts.register(credentials, setup=True)
+        token, _ = accounts.login(credentials, 'test')
+        first = {'id': 'first', 'sku': 'AP-20261119-123456', 'skuSource': 'manual', 'name': 'First',
+                 'cat': '服装', 'owner': 'Admin', 'status': '待补资料', 'color': '#fff', 'colors': 1,
+                 'sizes': 1, 'brand': 'Generic', 'manufacturer': 'Generic'}
+        second = {**first, 'id': 'second', 'sku': 'STORE-2', 'name': 'Second'}
+
+        def write(before, after, revision=0):
+            return self.call('/api/state', {'revision': revision, 'changes': [
+                {'scope': 'products', 'key': after['id'], 'before': before, 'after': [after]},
+            ]}, token)
+
+        with patch.object(server, 'DB', Path(self.temp.name)/'atomic-workspace.sqlite3'):
+            with server.database() as conn:
+                conn.execute('CREATE TABLE workspace (id INTEGER PRIMARY KEY, revision INTEGER, body TEXT)')
+            self.assertEqual(write([], first)[0], 200)
+            code, saved, _ = write([], second)
+            self.assertEqual(code, 200)
+            self.assertEqual({p['sku'] for p in saved['state']['products']}, {first['sku'], second['sku']})
+            self.assertEqual(write([], second)[1]['revision'], saved['revision'])
+            self.assertEqual(write([], {**second, 'id': 'third', 'sku': 'store-2'})[0], 400)
+            self.assertEqual(write([first], {**first, 'name': 'Updated'})[0], 200)
+            code, conflict, _ = write([first], {**first, 'name': 'Stale'})
+            self.assertEqual(code, 409)
+            self.assertEqual(conflict['conflict'], {'scope': 'products', 'key': 'first'})
+            _, current, _ = self.call('/api/state', token=token)
+            self.assertIn({**first, 'name': 'Updated'}, current['state']['products'])
+
     def test_capture_assigns_sku_immediately(self):
         accounts.register({'username':'admin','name':'示例用户','password':'administrator-test-123'},setup=True)
         session,user=accounts.login({'username':'admin','password':'administrator-test-123'},'test')
@@ -49,7 +79,7 @@ class AccountTests(unittest.TestCase):
                 c.execute('CREATE TABLE workspace (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL)')
             code,result,_=self.call('/api/import/browser',{'url':'https://detail.1688.com/offer/123456.html','title':'Supplier garment title','attributes':{'材质':'cotton'},'images':[],'market':'US'},extra={'Origin':'chrome-extension://test','X-Capture-Token':capture})
             self.assertEqual(code,200)
-            self.assertRegex(result['sku'],r'^WYJ[0-9]{14}$')
+            self.assertRegex(result['sku'],r'^SLYH[0-9]{14}$')
             with server.database() as c: state=json.loads(c.execute('SELECT body FROM workspace').fetchone()[0])
             self.assertEqual(state['products'][0]['sku'],result['sku'])
 

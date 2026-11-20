@@ -119,10 +119,12 @@ def handle_cli(base, argv=None):
         with Path(args[1]).open('x', encoding='utf-8') as output:
             json.dump(report, output, ensure_ascii=False, indent=2)
         return True
-    if len(args) < 2 or args[1] != 'ego-browser':
-        raise ValueError('Only the fixed ego-browser tool is supported')
+    tools={'ego-browser':'automation/ego_browser.py','ziniao-plugin':'automation/ziniao_plugin.py',
+           'validate-attributes':'junfei-publisher/validate_attributes.py'}
+    if len(args) < 2 or args[1] not in tools:
+        raise ValueError('Unknown fixed workbench tool')
     project = runtime_environment.project_root(base, env)
-    script = project / 'automation/ego_browser.py'
+    script = project / tools[args[1]]
     if not script.is_file():
         raise FileNotFoundError('Ego adapter is missing')
     # run_path preserves __file__, so the adapter reads config and receipts from
@@ -130,8 +132,15 @@ def handle_cli(base, argv=None):
     previous_argv = sys.argv
     sys.argv = [str(script), *args[2:]]
     attach_cli_streams()
+    sys.path.insert(0,str(script.parent))
     try:
+        if args[1]=='validate-attributes' and sys.stdin is None and os.name=='nt':
+            import ctypes, msvcrt
+            handle=ctypes.windll.kernel32.GetStdHandle
+            handle.restype=ctypes.c_void_p
+            sys.stdin=os.fdopen(msvcrt.open_osfhandle(handle(-10),os.O_RDONLY),'r',encoding='utf-8')
         runpy.run_path(str(script), run_name='__main__')
     finally:
+        sys.path.pop(0)
         sys.argv = previous_argv
     return True

@@ -47,8 +47,12 @@ class PublicationAPITests(unittest.TestCase):
             self.assertEqual(self.call('/api/publication/start',payload,Origin='https://other.example')[0],403)
             self.assertEqual(self.call('/api/publication/start',payload,**{'X-Workspace-Account':'2'})[0],409)
             start.assert_not_called()
-            self.assertEqual(self.call('/api/publication/start',payload)[0],202)
+            self.assertEqual(self.call('/api/publication/start',payload)[0],400)
+            start.assert_not_called()
+            proof={'confirmationDigest':'a'*64,'operatorPassword':'isolated-password-12345'}
+            self.assertEqual(self.call('/api/publication/start',{**payload,**proof})[0],202)
             self.assertEqual(start.call_args.args[0],1)
+            self.assertEqual(start.call_args.kwargs,{'confirmation':'a'*64})
 
     def test_read_only_views_cannot_start_publication(self):
         with patch.object(server.publication_flow,'view',return_value={'targets':[],'jobs':[]}), \
@@ -78,7 +82,13 @@ class PublicationAPITests(unittest.TestCase):
                 self.assertEqual(self.call('/api/publication/continue',payload,Origin='https://other.example')[0],403)
                 self.assertEqual(self.call('/api/publication/continue',payload,**{'X-Workspace-Account':'2'})[0],409)
                 resume.assert_not_called()
-                self.assertEqual(self.call('/api/publication/continue',payload)[0],202)
+                if payload.get('observeOnly'):
+                    self.assertEqual(self.call('/api/publication/observe',{'id':'original-job'})[0],202)
+                else:
+                    self.assertEqual(self.call('/api/publication/continue',payload)[0],400)
+                    resume.assert_not_called()
+                    proof={'confirmationDigest':'a'*64,'operatorPassword':'isolated-password-12345'}
+                    self.assertEqual(self.call('/api/publication/continue',{**payload,**proof})[0],202)
                 self.assertEqual(resume.call_args.args,(1,payload));start.assert_not_called()
 
 if __name__=='__main__':unittest.main()

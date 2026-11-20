@@ -46,6 +46,8 @@ studio-dev/experiments/
 **/.venv/
 **/venv/
 **/.deploy-venv/
+/.audit-build-venv/
+/.audit-portable/
 **/dist/
 **/build/
 **/target/

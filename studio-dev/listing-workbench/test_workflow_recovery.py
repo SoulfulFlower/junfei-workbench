@@ -16,6 +16,11 @@ class WorkflowRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        runtime = self.root / 'automation'
+        runtime.mkdir()
+        example = Path(__file__).resolve().parents[1] / 'automation/config.example.json'
+        (runtime / 'config.json').write_bytes(example.read_bytes())
+        self.enterContext(patch.dict(os.environ, {'JUNFEI_PROJECT_ROOT': str(self.root)}))
         self.workspace = {
             'products': [{'id': 'fixture', 'name': 'Synthetic test', 'market': 'US'}],
             'copy': {}, 'reviews': {},
@@ -281,7 +286,7 @@ except ValueError:
         env = dict(os.environ, FIXTURE_ROOT=root, FIXTURE_TASK=tid,
                    JUNFEI_ACCOUNT_DATA=root, JUNFEI_WORKER_USER='0')
         processes = [subprocess.Popen([sys.executable, '-B', '-c', code],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=Path(__file__).resolve().parent,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             for _ in range(2)]
         replies = []

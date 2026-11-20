@@ -10,6 +10,11 @@ import publication_flow as flow
 
 class PublicationFlowTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(flow.publication_policy, '_configuration', return_value={
+            'publishing': {'cross_marketplace_followup': {
+                'enabled': True, 'source_marketplace': 'US', 'target_marketplace': 'UK', 'trigger': 'publishing',
+            }},
+        }))
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
@@ -44,6 +49,18 @@ class PublicationFlowTests(unittest.TestCase):
                 patch.object(flow.collection, 'finished_snapshot', return_value=self.snapshot):
             return flow.start(2, self.workspace, {'productId': 'P', 'destinationId': 'US', 'confirmed': True})
 
+    def test_disabled_policy_blocks_both_readiness_and_start(self):
+        self.configure()
+        with patch.object(flow.publication_policy, '_configuration', return_value={}), patch.object(
+            flow, 'source_receipt', return_value=(self.source_job, self.snapshot, self.receipt)
+        ), patch.object(flow.threading, 'Thread') as thread:
+            view = flow.view(2, self.workspace, 'P')
+            self.assertFalse(view['targets'][0]['ready'])
+            self.assertIn('默认跨站发布规则未启用', view['targets'][0]['missing'])
+            with self.assertRaisesRegex(ValueError, '默认跨站发布规则未启用'):
+                self.start()
+            thread.assert_not_called()
+
     def test_settings_owned_preserve_history_and_never_start(self):
         with patch.object(flow.threading, 'Thread') as thread:
             old = self.configure()
@@ -73,6 +90,25 @@ class PublicationFlowTests(unittest.TestCase):
             self.assertEqual(packet['input']['ukCommerce']['variantPrices'], {'P-White-S':'24.19'})
             self.assertEqual(thread.call_count, 1)
             self.assertEqual(flow.owned(2,result['id'])['status'], 'queued')
+
+    def test_operator_confirmation_is_bound_to_current_store_and_snapshot(self):
+        self.configure()
+        payload = {'productId': 'P', 'destinationId': 'US', 'confirmed': True}
+        with patch.object(flow, 'source_receipt', return_value=(self.source_job, self.snapshot, self.receipt)), \
+                patch.object(flow.collection, 'finished_snapshot', return_value=self.snapshot), \
+                patch.object(flow.threading, 'Thread') as thread:
+            original = flow.preview(2, self.workspace, 'start', payload)
+            self.assertEqual(original['targetStore'], 'Shop-UK')
+            self.assertEqual(flow.list_jobs(2), [])
+            flow.save_settings(2, {'sourceDestinationId': 'US', 'storeName': 'Other-UK', 'shippingTemplate': 'UK'})
+            with self.assertRaisesRegex(ValueError, '预检内容已变化'):
+                flow.start(2, self.workspace, payload, confirmation=original['digest'])
+            thread.assert_not_called()
+            current = flow.preview(2, self.workspace, 'start', payload)
+            job = flow.start(2, self.workspace, payload, confirmation=current['digest'])
+            self.assertEqual(flow.owned(2, job['id'])['operatorConfirmation']['digest'], current['digest'])
+            self.assertTrue(flow.start(2, self.workspace, payload, confirmation=current['digest'])['reused'])
+            thread.assert_called_once()
 
     def test_missing_us_draft_and_item_condition_are_visible_together(self):
         self.configure()
@@ -325,6 +361,29 @@ class PublicationFlowTests(unittest.TestCase):
                 'accountId':2,'productId':'P','destinationId':destination,'countryCode':country,'store':store,
                 'parentSku':'P','children':[{'sku':'P-White-S','color':'White','size':'S'}]}}
         return r
+
+    def test_both_latest_matched_observations_required_for_verified_live(self):
+        self.configure()
+        with patch.object(flow.threading,'Thread'):
+            job=flow.owned(2,self.start()['id'])
+        folder=flow.ROOT/job['id']
+        packet=json.loads((folder/'input.json').read_text(encoding='utf-8'))['input']
+        record=self.successful_record()
+        record.update(jobId=job['id'],snapshotSha256=packet['sha256'])
+        record['ukCopy']['phase']='copy_verified'
+        prepared=copy.deepcopy(packet)
+        prepared.update(store=packet['ukTarget']['storeName'],destination={
+            'countryCode':'GB','destinationId':packet['ukTarget']['id'],'draftId':'456'})
+        record['ukPrepare'].update(preparedInput=prepared,draftId='456')
+        job['status']='submitted'
+        for station in ('usPublish','ukPublish'):
+            record[station]['latestObservation']={'publishId':record[station]['publishId'],'status':'online',
+                'verification':'accepted','failed':False,'allChildrenOnline':True,'childCount':len(packet['goodsItems'])}
+        flow.write_json(folder/'receipt.json',record)
+        self.assertTrue(flow.public(job)['onlineVerified'])
+        record['ukPublish']['latestObservation']['publishId']='999999'
+        flow.write_json(folder/'receipt.json',record)
+        self.assertFalse(flow.public(job)['onlineVerified'])
 
     def test_final_status_needs_both_real_ids_correct_store_skus_and_colours(self):
         source={**self.snapshot,'ukTarget':{'id':'US-UK','storeName':'Shop-UK'}}

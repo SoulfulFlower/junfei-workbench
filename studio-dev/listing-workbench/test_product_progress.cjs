@@ -7,9 +7,16 @@ function fixture(){
 }
 test('ERP accepted publication completes the archive before retail visibility, without rewriting review or status',()=>{
  const {ctx,product}=fixture(),before=JSON.stringify(product);
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  assert.equal(ctx.productCompletionRecord(product).verifiedLive,false);
  assert.equal(JSON.stringify(product),before);
+});
+test('a verified original receipt distinguishes live children from merely accepted ones',()=>{
+ const {ctx,product}=fixture();
+ product.erpPublication.allChildrenOnline=true;
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
+ for(const child of product.erpPublication.children)child.status='online';
+ assert.equal(ctx.productDisplayStatus(product),'在售已核验');
 });
 test('draft-only, failed, uncertain, foreign account/product/SKU and missing receipts never complete',()=>{
  const f=fixture();
@@ -23,7 +30,7 @@ test('retired manual-review statuses become in progress, not fake completed',()=
 test('formal US/UK job completion is account and SKU scoped and requires both real task IDs',()=>{
  const {ctx}=fixture(),product={id:'p1',sku:'PARENT',status:'制作中'};
  vm.runInContext("productPublicationOwner=2;productPublicationJobs=[{productId:'p1',parentSku:'PARENT',status:'submitted',publishSubmitted:true,usPublishId:'100',ukPublishId:'200'}]",ctx);
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  ctx.signedUser={id:3};assert.equal(ctx.productDisplayStatus(product),'制作中');
  ctx.signedUser={id:2};vm.runInContext("productPublicationJobs[0].status='needs_reconciliation'",ctx);assert.equal(ctx.productDisplayStatus(product),'需修改');
  vm.runInContext("productPublicationJobs[0].status='submitted';productPublicationJobs[0].ukPublishId=''",ctx);assert.equal(ctx.productDisplayStatus(product),'制作中');
@@ -40,7 +47,7 @@ test('current production failures mark needs changes without rewriting product o
 test('real publication receipt takes priority over older production failures',()=>{
  const {ctx,product}=fixture();
  vm.runInContext("productPublicationOwner=2;productProductionProgress=[{productId:'p1',parentSku:'PARENT',needsAttention:true}]",ctx);
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
 });
 
 test('later failure of an accepted formal task blocks stale single-market completion without changing its history',()=>{
@@ -82,7 +89,7 @@ test('task failures from another account product or SKU cannot suppress a legiti
   const {ctx,product}=fixture(),job={productId:'p1',parentSku:'PARENT',status:'needs_reconciliation',usPublishId:'1234',...changes};
   ctx.failureFixture=job;
   vm.runInContext(`productPublicationOwner=failureFixture.owner||2;productPublicationJobs=[failureFixture]`,ctx);
-  assert.equal(ctx.productDisplayStatus(product),'已完成');
+  assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  }
 });
 
@@ -94,7 +101,7 @@ test('later accepted observations let the same original task complete after reco
   usPublicationObservation:{publishId:'1234',status:'accepted',failed:false,verification:'accepted'},
   ukPublicationObservation:{publishId:'2000',status:'publishing',failed:false,verification:'accepted'}
  }]`,ctx);
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  assert.equal(ctx.productCompletionRecord(product).ukTaskId,'2000');
 });
 
@@ -103,7 +110,7 @@ test('legacy publication observes latest failure but preserves a recovered lates
  p.failureObservation={publishId:'1234',status:'failed',failed:true,verification:'failed'};
  assert.equal(ctx.productCompletionRecord(product),null);
  p.latestObservation={publishId:'1234',status:'accepted',failed:false,verification:'accepted'};
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  p.latestObservation={publishId:'1234',status:'queued',failed:false};
  assert.equal(ctx.productCompletionRecord(product),null);
  p.latestObservation={publishId:'1234',status:'accepted',failed:false,verification:'unknown'};
@@ -114,7 +121,7 @@ test('legacy production receipt cannot bypass the later failure of its same form
  const {ctx}=fixture(),product={id:'p1',sku:'PARENT',status:'已完成',
   erpProductionDraft:{published:true,verifiedLive:true,marketplace:'US',taskId:'1234'},
   erpPublishObservation:{marketplace:'US',allChildrenOnline:true}};
- assert.equal(ctx.productDisplayStatus(product),'已完成');
+ assert.equal(ctx.productDisplayStatus(product),'发布已受理 · 在售待核验');
  vm.runInContext(`productPublicationOwner=2;productPublicationJobs=[{
   productId:'p1',parentSku:'PARENT',status:'needs_reconciliation',usPublishId:'1234',
   usPublicationObservation:{publishId:'1234',status:'failed',failed:true,verification:'failed'}

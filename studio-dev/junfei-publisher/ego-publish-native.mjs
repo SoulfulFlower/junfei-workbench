@@ -142,7 +142,10 @@ export function verifyPublication(response,input,publishId,{allowOnline=false}={
  }
  return{publishId:String(d.id),status:d.status,accountId:input.accountId,erpAccountId:String(d.uid),productId:input.productId,
   destinationId:input.destination.destinationId,draftId:String(input.destination.draftId),marketId:String(d.market_id),countryCode:d.country_code,
-  store:d.market.alias,parentSku:d.sku,children:checks.map(v=>({sku:v.sku,color:v.color,size:v.size,images:v.images})),
+  store:d.market.alias,parentSku:d.sku,children:checks.map(v=>{
+   const child=d.items.find(row=>row.sku===v.sku);
+   return{sku:v.sku,color:v.color,size:v.size,images:v.images,status:child.status,asin:child.asin??null};
+  }),
   allChildrenOnline,imagePersistenceVerified:checks.every(v=>v.imagesSource==='child_gallery'),errors:[],...(warnings.length?{warnings}:{})};
 }
 

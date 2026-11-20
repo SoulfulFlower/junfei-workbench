@@ -18,7 +18,8 @@ class PortableBuildTests(unittest.TestCase):
             (self.root / path).mkdir(parents=True)
         self.config = json.loads((build.ROOT / 'packaging/portable-config.json').read_text(encoding='utf-8'))
         (self.root / 'packaging/portable-config.json').write_text(json.dumps(self.config), encoding='utf-8')
-        (self.root / 'automation/ego_browser.py').write_text('# fixture', encoding='utf-8')
+        for name in build.AUTOMATION_TOOLS:
+            (self.root / 'automation' / name).write_text('# fixture', encoding='utf-8')
         (self.root / 'junfei-publisher/ego_link.py').write_text('# fixture', encoding='utf-8')
         for name in build.MODULES:
             (self.root / 'junfei-publisher' / name).write_text('// fixture', encoding='utf-8')

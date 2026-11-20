@@ -153,7 +153,9 @@ class ImageTests(unittest.TestCase):
     def test_poll_and_terminal_cache(self):
         images.save(dict(id='task-one', status='pending', images=[]))
         response = {'data': {'status': 'completed', 'progress': 100, 'result': {'images': [{'url': ['https://upload.apimart.ai/example.png']}]}}}
-        with patch.object(images, 'api', return_value=response) as api:
+        with patch.object(images, 'api', return_value=response) as api, patch.object(
+            images.custom_images, 'remote_image', side_effect=ValueError('fixture image unavailable')
+        ):
             self.assertEqual(images.poll({'id': 'task-one'})['images'], ['https://upload.apimart.ai/example.png'])
             self.assertEqual(images.poll({'id': 'task-one'})['status'], 'completed')
             self.assertEqual(api.call_count, 1)

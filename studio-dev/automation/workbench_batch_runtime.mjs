@@ -64,8 +64,8 @@ export async function run(plan){
   }else if(plan.action==='observe'){
    const id=plan.jobs[0];if(plan.jobs.length!==1)throw Error('一次只刷新一个原双站刊登');
    const original=report.reads['job:'+id];if(!original?.ok)throw Error('未取得原任务状态');assertObserveScope(original.body.job,id,plan.accountId);
-   const intent={id,confirmed:true,observeOnly:true};report.observeIntent=intent;await persist(plan.resultFile,report);
-   const result=await call({url:'/api/publication/continue',body:intent});report.actions.push({id,result});if(!result.ok)throw Error('原任务观察未确认；查看回执，不自动再次调度');
+   const intent={id};report.observeIntent=intent;await persist(plan.resultFile,report);
+   const result=await call({url:'/api/publication/observe',body:intent});report.actions.push({id,result});if(!result.ok)throw Error('原任务观察未确认；查看回执，不自动再次调度');
   }
  }catch(error){report.error=String(error.message||error);}
  finally{await persist(plan.resultFile,report);if(lock){await lock.close();await fs.unlink(lockPath);}}

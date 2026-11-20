@@ -13,8 +13,8 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ('ego-existing-draft.mjs', 'ego-draft-images.mjs', 'ego-library-draft.mjs',
-           'ego-library-images.mjs', 'ego-library-package.mjs', 'listing.mjs', 'existing-draft.mjs')
+sys.path.insert(0, str(ROOT / 'listing-workbench'))
+from runtime_files import MODULES, AUTOMATION_TOOLS
 FORBIDDEN_NAMES = {'project-root.txt', '.env', 'auth.json', 'deployment.json'}
 FORBIDDEN_SUFFIXES = ('.sqlite3', '.sqlite3-wal', '.sqlite3-shm', '.dpapi', '.fernet', '.key')
 SOURCE_ASSET_DIRS = ('extension', 'assets')
@@ -86,6 +86,8 @@ def create_source_archive(output, root):
         source = root / relative
         if source.is_file():
             selected[relative] = source.read_bytes()
+    for name in AUTOMATION_TOOLS:
+        selected['automation/' + name] = (root / 'automation' / name).read_bytes()
     for name in MODULES:
         selected['junfei-publisher/' + name] = (root / 'junfei-publisher' / name).read_bytes()
     for relative in ('listing-workbench/DISCOVERY-INTAKE.md', 'listing-workbench/test_discovery_intake.py',
@@ -126,7 +128,8 @@ def prepare_stage(destination, root=ROOT):
     (runtime / 'automation').mkdir(parents=True)
     (runtime / 'junfei-publisher').mkdir()
     (runtime / 'automation/config.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
-    shutil.copy2(root / 'automation/ego_browser.py', runtime / 'automation/ego_browser.py')
+    for name in AUTOMATION_TOOLS:
+        shutil.copy2(root / 'automation' / name, runtime / 'automation' / name)
     shutil.copy2(root / 'junfei-publisher/ego_link.py', runtime / 'junfei-publisher/ego_link.py')
     for name in MODULES:
         shutil.copy2(root / 'junfei-publisher' / name, runtime / 'junfei-publisher' / name)
@@ -209,7 +212,9 @@ def main():
     app = output / 'dist/AmazonAgentPortable'
     shutil.copy2(ROOT / 'packaging/PORTABLE-README.txt', app / '使用说明.txt')
     result = verify_artifact(app)
-    result.update(folder=str(app), buildLog=str(output / 'build.log'), smokeTested=False,
+    subprocess.run([sys.executable, str(ROOT / 'packaging/smoke_portable.py'), '--folder', str(app),
+                    '--report', str(output / 'smoke-result.json')], check=True)
+    result.update(folder=str(app), buildLog=str(output / 'build.log'), smokeTested=True,
                   secondComputerTested=False)
     (output / 'build-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps(result))

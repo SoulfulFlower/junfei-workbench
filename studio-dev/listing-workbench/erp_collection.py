@@ -27,7 +27,8 @@ import delivery_export
 import erp_collection_inputs as inputs
 
 ROOT=app_paths.DATA/'erp-collection'
-PROJECT=Path(__file__).resolve().parent.parent
+import runtime_environment
+PROJECT=runtime_environment.resource_root(app_paths.APP,Path(__file__).resolve().parent.parent)
 FIELDS=('title','highlights','bullets','description','terms')
 ACTIVE=set()
 LOCK=threading.Lock()
@@ -167,7 +168,8 @@ def view(user,workspace,pid):
 
 def finished_snapshot(user,p,listing,destination,folder,prior=None):
     """Read selected live image records directly, preserving review provenance."""
-    if not p.get('sku') or not re.fullmatch(r'[A-Za-z0-9_-]{1,40}',p['sku']):raise ValueError('产品缺少有效父SKU')
+    from product_sku import PARENT_SKU, PARENT_SKU_ERROR
+    if not PARENT_SKU.fullmatch(p.get('sku') or ''):raise ValueError(PARENT_SKU_ERROR)
     variant_rows=eligible_variant_rows(p)
     destination=inputs.commerce(user,p,destination,variant_rows,prior)
     if any(not listing.get(k) for k in ('title','bullets','description','terms')):raise ValueError('请先保存完整Listing文案')
@@ -185,14 +187,15 @@ def finished_snapshot(user,p,listing,destination,folder,prior=None):
     if not variant_colours.has_reference(groups.get(master),plan.get('product_source_url') or ((plan.get('images') or [{}])[0].get('product_source_url'))):
         raise ValueError('母版与本款真实颜色参考不匹配')
     selected={};project=plan.get('_projectId')
-    generated=generated_gallery.export_images(p,project)
+    read_options={'local_only':True} if folder is None else {}
+    generated=generated_gallery.export_images(p,project,**read_options)
     if generated is not None:selected[master]=[(raw,info) for raw,info in generated]
     else:
         images=[]
         for slot,image in enumerate(plan.get('images',[])):
             if not image.get('_runId') or image.get('_status') not in ('approved','awaiting_manual') or image.get('render_qa',{}).get('ready') is False:
                 raise ValueError('母版图位未通过草稿检查')
-            raw,mime=studio_bridge.result_image(image['_runId'])
+            raw,mime=studio_bridge.result_image(image['_runId'],**read_options)
             images.append((raw,{'slot':slot,'mime':mime,'runId':image['_runId'],'humanReviewed':image.get('human_reviewed') is True,'status':image['_status']}))
         selected[master]=images
     for v in colour_sets.list_sets(p['id'])['sets']:
@@ -205,12 +208,13 @@ def finished_snapshot(user,p,listing,destination,folder,prior=None):
         for item in sorted(v.get('items',[]),key=lambda i:i['slot']):
             if not item.get('image') or item.get('status') not in ('approved','awaiting_manual') or (item.get('qc') or {}).get('pass') is not True:
                 raise ValueError('换色图位未通过草稿检查：'+groups[key]['color'])
-            raw,mime=colour_sets.image_bytes(v['id'],item['slot'])
+            raw,mime=colour_sets.image_bytes(v['id'],item['slot'],**read_options)
             rows.append((raw,{'slot':item['slot'],'mime':mime,'setId':v['id'],'humanReviewed':v.get('manual') is True and item['status']=='approved','status':item['status'],'warnings':(item.get('qc') or {}).get('warnings',[])}))
         if key in selected:raise ValueError('同色有多套成品，请先明确保留版本')
         selected[key]=rows
     if set(selected)!=set(groups):raise ValueError('拟交付颜色缺少完整成品套图')
-    assets=[];by_colour={};folder.mkdir(parents=True,exist_ok=True)
+    assets=[];by_colour={}
+    if folder is not None:folder.mkdir(parents=True,exist_ok=True)
     for key,rows in selected.items():
         if [info['slot'] for _,info in rows]!=list(range(7)):raise ValueError('每色必须按顺序保留完整7张成品图')
         indices=[]
@@ -220,8 +224,8 @@ def finished_snapshot(user,p,listing,destination,folder,prior=None):
                 width,height=im.size;fmt=im.format
                 if fmt not in ('PNG','JPEG') or min(width,height)<1600 or len(raw)>=5*1024*1024:raise ValueError('成品图片需PNG/JPEG、至少1600像素且小于5MB')
                 im.verify()
-            name=sha+('.png' if fmt=='PNG' else '.jpg');file=folder/name
-            if not file.exists():file.write_bytes(raw)
+            name=sha+('.png' if fmt=='PNG' else '.jpg');file=folder/name if folder is not None else name
+            if folder is not None and not file.exists():file.write_bytes(raw)
             indices.append(len(assets));assets.append({'path':str(file),'sha256':sha,'width':width,'height':height,'color':groups[key]['color'],**info})
         by_colour[key]=indices
     variants=[]
@@ -247,7 +251,46 @@ def finished_snapshot(user,p,listing,destination,folder,prior=None):
     return result
 
 
-def start(user,workspace,data):
+def review_packet(snapshot):
+    """Expose only business fields, resolving each SKU's ordered local image identities."""
+    variants={}
+    for row in snapshot['goodsItems']:
+        images=[{k:snapshot['assets'][i].get(k) for k in
+                 ('slot','sha256','color','runId','jobId','setId','imageIndex','status','humanReviewed')}
+                for i in row['imageIndices']]
+        variants[row['sku']]={**{k:v for k,v in row.items() if k!='imageIndices'},'images':images}
+    dest=snapshot['destination']
+    return {'contentDigest':inputs.content_digest(snapshot),'goods':snapshot['goods'],'variants':variants,
+            'store':snapshot['store'],'marketplace':snapshot['marketplace'],'handlingDays':snapshot['handlingDays'],
+            'purchaseCny':dest.get('purchaseCny'),'currency':dest.get('currency') or
+            inputs.MARKETS[snapshot['marketplace']][0], 'pricingSource':(snapshot.get('pricingBasis') or {}).get('source')}
+
+
+def review_digest(packet):
+    return hashlib.sha256(json.dumps(packet,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+
+def preflight(user,product,listing,destination,prior):
+    if prior and prior.get('draftId') and not (ROOT/prior['id']/'receipt.json').is_file():
+        raise ValueError('缺少原草稿回执，请人工对账')
+    old_file=ROOT/prior['id']/'collection.json' if prior else None
+    original=json.loads(old_file.read_text(encoding='utf-8')) if old_file and old_file.is_file() else None
+    current=finished_snapshot(user,product,listing,destination,None,original)
+    if original and inputs.content_digest(current)!=inputs.content_digest(original):
+        raise ValueError('当前成品与原采集快照不同，请核对原草稿')
+    # A resumed worker uses the original packet. Check current price and artwork
+    # identities as well as the business-content comparison used by older jobs.
+    if original:
+        original['destination']={**current['destination'],**original.get('destination',{})}
+        frozen=review_packet(original)
+        fresh=review_packet(current)
+        if any(frozen[k]!=fresh[k] for k in ('purchaseCny','currency','variants')):
+            raise ValueError('原草稿价格或图位证据与当前成品不同，请核对原回执')
+        return frozen
+    return review_packet(current)
+
+
+def start(user,workspace,data,*,reviewed_digest=None,handoff=None):
     if not isinstance(data,dict) or set(data)-{'productId','destinationId','expectedListing'}:raise ValueError('采集参数无效')
     p=product_for(workspace,data.get('productId'))
     ds=[d for d in destinations(user) if d['id']==data.get('destinationId')]
@@ -261,15 +304,22 @@ def start(user,workspace,data):
         if row:
             prior=json.loads(row[0]);receipt=ROOT/prior['id']/'receipt.json'
             live=public(prior)
-            if live['status'] in ('queued','running'):return {**live,'reused':True}
+            if live['status'] in ('queued','running'):
+                if handoff:raise ValueError('原草稿任务已在执行，请核对原任务')
+                return {**live,'reused':True}
             snapshot_file=ROOT/prior['id']/'collection.json'
             if snapshot_file.is_file():
                 original=json.loads(snapshot_file.read_text(encoding='utf-8'))
                 current=finished_snapshot(user,p,listing,d,ROOT/prior['id']/'media',original)
                 if inputs.content_digest(current)!=inputs.content_digest(original):
                     raise ValueError('当前成品与原采集版本不同；已保留原记录，请先对账更新，不能复用旧成功回执')
+            if reviewed_digest and (live['status']!='needs_reconciliation' or
+                    review_digest(preflight(user,p,listing,d,live))!=reviewed_digest):
+                raise ValueError('原草稿或审核版本已变化')
             if prior['status']=='verified' and prior.get('engine')=='native-v2':return {**public(prior),'reused':True}
-            if prior.get('draftId') and not receipt.is_file():return {**live,'reused':True}
+            if prior.get('draftId') and not receipt.is_file():
+                if handoff:raise ValueError('缺少原草稿回执，请人工对账')
+                return {**live,'reused':True}
             job=prior;job.setdefault('history',[]).append({'error':job.pop('error',None),'resumedAt':time.time()})
             job.update(status='queued',phase='等待浏览器，从持久回执对账续跑',runOwner=RUNTIME,ownerPid=os.getpid(),engine='native-v2')
             c.execute('UPDATE jobs SET status=?,body=? WHERE id=?',('queued',json.dumps(job,ensure_ascii=False),job['id']))
@@ -278,6 +328,12 @@ def start(user,workspace,data):
                  'parentSku':p['sku'],'status':'queued','phase':'读取当前成品','createdAt':time.time(),'updatedAt':time.time(),'published':False,
                  'runOwner':RUNTIME,'ownerPid':os.getpid(),'engine':'native-v2'}
             c.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?)',(job['id'],user,p['id'],d['id'],job['status'],json.dumps(job,ensure_ascii=False)))
+        if handoff:
+            import codex_handoff
+            codex_handoff.record(c,handoff,job['id'],'queued')
+        if reviewed_digest:
+            job['reviewedDigest']=reviewed_digest
+            c.execute('UPDATE jobs SET body=? WHERE id=?',(json.dumps(job,ensure_ascii=False),job['id']))
         ACTIVE.add(job['id']);launch=(job,p,listing,d)
     # Commit the identity before starting a worker or any external operation.
     threading.Thread(target=execute,args=launch,daemon=True).start()
@@ -332,6 +388,12 @@ def execute(job,p,listing,d):
             commerce=inputs.commerce(job['accountId'],p,d,eligible_variant_rows(p),snapshot)
             snapshot['destination']={**inputs.transport(job['accountId'],p,commerce),**snapshot.get('destination',{})}
         else:snapshot=finished_snapshot(job['accountId'],p,listing,d,folder/'media')
+        if job.get('reviewedDigest'):
+            if review_digest(review_packet(snapshot))!=job['reviewedDigest']:
+                raise ValueError('草稿成品与已批准的逐项证据不同，请重新核对')
+            for asset in snapshot['assets']:
+                if hashlib.sha256(Path(asset['path']).read_bytes()).hexdigest()!=asset['sha256']:
+                    raise ValueError('原成品图片字节与审核记录不符')
         snapshot['destination'].update(destinationId=d['id'],workflowVersion=2,categoryHints=inputs.category_hints(p))
         snapshot_file.write_text(json.dumps(snapshot,ensure_ascii=False,indent=2),encoding='utf-8')
         job.update(variantCount=len(snapshot['goodsItems']),imageCount=len(snapshot['assets']),phase='等待专属浏览器');persist(job)
@@ -343,11 +405,11 @@ def execute(job,p,listing,d):
             'await runCollectionWorkflow(globalThis.amazonTask.page('+json.dumps(d['page'])+'),input,'+json.dumps(str(receipt))+');\n',encoding='utf-8')
         with browser_lease(d['browserBinding']):
             job['phase']='核对店铺和插件登录';persist(job)
-            login=[sys.executable,'-X','utf8',str(PROJECT/'automation/ziniao_plugin.py'),'--store-id',str(d['storeId']),'--store-name',d['storeName'],
+            login=runtime_environment.automation_command('ziniao-plugin',PROJECT)+['--store-id',str(d['storeId']),'--store-name',d['storeName'],
                    '--market',d['marketplace'],'--seller',d['seller'],'--account',d['erpAccount'],'--ensure-site','--receipt',str(folder/'login.json')]
             r=subprocess.run(login,capture_output=True,timeout=150,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             if r.returncode:raise ValueError('店铺或插件登录未通过；完成登录后点击继续，保留原回执')
-            command=[sys.executable,'-X','utf8',str(PROJECT/'automation/ego_browser.py'),'run',str(script),'--timeout','1200','--binding',d['browserBinding'],'--application-job']
+            command=runtime_environment.ego_command(PROJECT)+['run',str(script),'--timeout','1200','--binding',d['browserBinding'],'--application-job']
             # Each resume gets a fresh local script name, while sharing the same
             # external receipt. The transport replay barrier remains enabled.
             attempt=folder/('run-'+uuid.uuid4().hex+'.mjs');attempt.write_bytes(script.read_bytes());command[command.index(str(script))]=str(attempt)

@@ -1,0 +1,53 @@
+name: Workbench regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-regression:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      JUNFEI_ACCOUNT_DATA: ${{ runner.temp }}/junfei-account
+      NUMBA_CACHE_DIR: ${{ runner.temp }}/junfei-numba
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Create offline sample configuration
+        run: Copy-Item studio-dev/automation/config.example.json studio-dev/automation/config.json
+      - name: Install Python dependencies
+        run: python -m pip install -r studio-dev/listing-workbench/cloud_requirements.txt
+      - name: Build visual workbench
+        working-directory: studio-dev/listing-workbench/visual-ui
+        run: |
+          npm ci
+          npm run build
+      - name: Check ERP executor
+        working-directory: studio-dev/junfei-publisher
+        run: |
+          npm ci
+          npm run check
+      - name: Check workbench JavaScript
+        working-directory: studio-dev/listing-workbench
+        run: |
+          $tests = Get-ChildItem -File | Where-Object Name -Match '^test_.*\.(cjs|mjs)$' | ForEach-Object FullName
+          node --test @tests
+      - name: Check workbench Python core
+        working-directory: studio-dev/listing-workbench
+        run: python -X utf8 -m unittest test_accounts test_codex_operations test_listing_jobs test_listing_job_api test_agent_erp_collection test_workflow_recovery test_erp_collection test_publication_flow test_publication_api test_publication_recovery test_images test_market_research
+      - name: Check automation and packaging
+        run: |
+          python -X utf8 -m unittest discover -s studio-dev/automation -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -X utf8 -m unittest discover -s studio-dev/packaging -p 'test_*.py'

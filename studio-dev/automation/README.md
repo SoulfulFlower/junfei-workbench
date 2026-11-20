@@ -219,10 +219,16 @@ py -3 automation/pipeline.py template 任务ID
 py -3 automation/pipeline.py finish 任务ID --token 领取返回的token --evidence "证据JSON绝对路径"
 py -3 automation/pipeline.py hold 任务ID --token 领取返回的token --status blocked --reason "缺包装重量"
 py -3 automation/pipeline.py hold 任务ID --token 领取返回的token --status uncertain --reason "提交请求超时，需核对ERP"
-py -3 automation/pipeline.py resume 任务ID --reconciled-no-submission "已查实际ERP及服务商，确认未提交；证据路径……"
+py -3 automation/pipeline.py resume 任务ID --token 原领取凭据 --reconciled-no-submission "已核对暂停原因和原资料；具体记录……"
 ```
 
-running任务重启后保留，绝不自动重新提交。若实际已成功，使用原token和真实证据finish；确认未提交才resume。每阶段最多2次尝试，失败达到上限先修复诊断，不自动清零。缺资料产品隔离后继续其它ready任务。
+文案、启用付费生图的图片阶段和发布阶段遇到中断时，保留原领取凭据和外部任务号。核对原请求后用原凭据执行 `finish` 登记实际结果。已暂停的本地或只读阶段可用现有凭据申请重新领取，运行中的任务仍由原领取人处理。
+
+文案阶段的 `delivery_scope` 冻结源 ASIN、站点、父 SKU 及已核对的子 SKU、源子 ASIN、颜色、尺码和颜色键，并附带实际 Listing JSON。图片阶段使用 `image_slots` 列出每个颜色键及图位对应的绝对图片路径。导出使用工作台格式 ZIP，检查清单、子 SKU 配图顺序、实际图片和已完成图位的哈希。未包含新格式的历史成品回执需核对原交付记录。
+
+CLI 在售核验读取工作台已经保存的 ERP 原发布观察。运营员先到原发布任务执行只读核对，为单款和站点生成配对码，再通过 `JUNFEI_CODEX_TOKEN` 配置 CLI。完成核验需要原 ERP 发布号（`external_ids`）和工作台发布任务号（`workbench_publication_id`）。读回地址使用创建任务时冻结的 `execution.workbench_url`，默认 `http://127.0.0.1:18765`。复核时会检查店铺、站点、原发布号、完整子 SKU 及每个子体的在售状态和 ASIN。缺少工作台原任务关联的外部 CLI 发布回执会保留待核对。
+
+进程重启保留运行中任务及原凭据。实际已成功时使用原凭据和真实证据执行 `finish`。每阶段默认最多两次领取，达到上限后按原任务诊断。缺资料的产品暂停后，其他可领取任务可继续。
 
 `config.json`修改影响新任务；已有任务使用创建时快照。生图开启时先用 `reserve-image-cost 任务ID --max-rmb 金额` 登记本次单次费用的最高限额，再领取图片阶段；同一产品和本地自然日的已结算费用及未完成预留会累计占用预算。生成任务结果未知时保留预留，不得释放或重发。账单核实后用 `settle-image-cost 预留ID --actual-rmb 金额 --note "账单核验依据" [--external-id 服务商任务号]` 结算；确认未收费时金额填 `0` 并在备注说明。`image-budget-status` 查看当日明细。超出预留或配置上限的实际收费会记录为 `over_budget` 并阻断该图片阶段完成；本地闸门无法阻止服务商违反报价或对单次调用事后加价，因此只允许在调用前费用明确、单次最高费用不超过预留时提交，不能把本地台账描述为供应商侧硬封顶。
 
