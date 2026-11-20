@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import tempfile
 import unittest
+from urllib.parse import unquote
 from unittest.mock import patch
 import ego_browser
 
@@ -15,7 +16,7 @@ class EgoRunnerTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.config = {'task_space_id': 1}
         self.cli = self.root / 'ego-browser.exe'
-        self.scripts = self.root / 'scripts'
+        self.scripts = self.root / 'scripts~entry'
         self.scripts.mkdir()
         self.settings = patch.object(ego_browser, 'settings', return_value=(self.config,self.cli,self.scripts))
         self.settings.start()
@@ -114,5 +115,5 @@ class EgoRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode,1)
         failure=ego_browser.application_error(result,'app',__import__('hashlib').sha256(self.script.read_bytes()).hexdigest())
         self.assertEqual(failure['message'],'专属采集浏览器连接已变化，请重新连接')
-        self.assertIn(next(self.scripts.glob('round-*.mjs')).as_uri(),failure['stack'])
+        self.assertIn(unquote(next(self.scripts.glob('round-*.mjs')).as_uri()),unquote(failure['stack']))
         self.assertNotIn('business should not run',failure['message'])

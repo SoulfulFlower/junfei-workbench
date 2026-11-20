@@ -16,6 +16,7 @@ import uuid
 import os
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import unquote
 from PIL import Image
 import app_paths
 import studio_bridge
@@ -365,8 +366,8 @@ def browser_preflight_failure(script,output,binding):
         text=output.decode('utf-8',errors='replace') if isinstance(output,bytes) else str(output)
         # Node reports the URI used to import the bootstrap. Windows temporary
         # paths may use a short-name alias that resolve() expands before reading.
-        entry_uris={recorded_entry.as_uri(),entry.as_uri()}
-        frames=re.findall('(?:'+'|'.join(re.escape(uri) for uri in sorted(entry_uris))+r'):(\d+):\d+',text)
+        entry_uris={unquote(recorded_entry.as_uri()),unquote(entry.as_uri())}
+        frames=re.findall('(?:'+'|'.join(re.escape(uri) for uri in sorted(entry_uris))+r'):(\d+):\d+',unquote(text))
         known=('专属采集浏览器连接已变化，请重新连接','浏览器已交还或中断，请完成验证后继续',
                '专属工作区归属不符，停止操作','专属工作区名称不符，停止操作','专属ERP页面不唯一，请重新连接')
         for number in frames:

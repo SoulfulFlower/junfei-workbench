@@ -134,15 +134,17 @@ class CollectionTests(unittest.TestCase):
 
     def test_preflight_proof_accepts_recorded_entry_alias_without_losing_guard_checks(self):
         script=self.root/'collect.mjs';script.write_text('// business script',encoding='utf-8')
-        alias=self.root/'entry-path';alias.mkdir()
+        alias=self.root/'entry~path';alias.mkdir()
         with patch.object(erp,'PROJECT',self.root):
             output,_,_=self.preflight_evidence(script,entry_parent=alias/'..')
+            output=output.replace(b'~',b'%7E')
             proof=erp.browser_preflight_failure(script,output,'app')
             self.assertIsNotNone(proof)
             self.assertEqual(proof['line'],2)
             self.assertEqual(Path(proof['entry']),self.root.resolve()/('round-'+'a'*32+'.mjs'))
             self.assertIsNone(erp.browser_preflight_failure(script,output,'other-binding'))
             output,_,_=self.preflight_evidence(script,entry_parent=alias/'..',after_import=True)
+            output=output.replace(b'~',b'%7E')
             self.assertIsNone(erp.browser_preflight_failure(script,output,'app'))
 
     def test_bootstrap_failure_keeps_original_job_and_reports_proven_import_boundary(self):
