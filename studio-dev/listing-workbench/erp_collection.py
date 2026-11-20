@@ -355,13 +355,18 @@ def browser_preflight_failure(script,output,binding):
         if (record.get('script')!=str(script) or record.get('sha256')!=digest
                 or record.get('browserBinding')!=binding or record.get('exitCode') in (None,0)):
             return None
-        entry=Path(record['entry']).resolve(strict=True)
+        recorded_entry=Path(record['entry'])
+        if not recorded_entry.is_absolute():return None
+        entry=recorded_entry.resolve(strict=True)
         if not re.fullmatch(r'round-[a-f0-9]{32}\.mjs',entry.name):return None
         lines=entry.read_text(encoding='utf-8').splitlines()
         imported='await import('+json.dumps(script.as_uri())+');'
         import_line=lines.index(imported)+1
         text=output.decode('utf-8',errors='replace') if isinstance(output,bytes) else str(output)
-        frames=re.findall(re.escape(entry.as_uri())+r':(\d+):\d+',text)
+        # Node reports the URI used to import the bootstrap. Windows temporary
+        # paths may use a short-name alias that resolve() expands before reading.
+        entry_uris={recorded_entry.as_uri(),entry.as_uri()}
+        frames=re.findall('(?:'+'|'.join(re.escape(uri) for uri in sorted(entry_uris))+r'):(\d+):\d+',text)
         known=('专属采集浏览器连接已变化，请重新连接','浏览器已交还或中断，请完成验证后继续',
                '专属工作区归属不符，停止操作','专属工作区名称不符，停止操作','专属ERP页面不唯一，请重新连接')
         for number in frames:
