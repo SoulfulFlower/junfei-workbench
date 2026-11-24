@@ -1,5 +1,5 @@
 function skillCatalogStatus(skill) {
-  if (skill.mode === 'codex') return skill.bundled ? ['项目内置 · 商品页配对', 'active'] : ['请在项目仓库打开 Codex', 'warning'];
+  if (skill.mode === 'codex') return skill.installed ? ['本机已安装', 'success'] : ['需在 Codex 安装', 'warning'];
   return skill.mode === 'editable' ? ['可编辑规则', 'active'] : ['工作台内置', ''];
 }
 

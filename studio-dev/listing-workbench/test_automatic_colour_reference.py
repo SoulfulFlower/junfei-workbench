@@ -21,6 +21,10 @@ class AutomaticReferenceTests(unittest.TestCase):
  def test_white_and_black_variants_are_sampled_from_their_fabric(self):
   for n in (7,245):
    result=ref.colour(Image.new('RGB',(40,40),(n,n,n)),Image.new('L',(40,40),255));np.testing.assert_allclose(result['rgb'],n,atol=1)
+ def test_tiny_misclassified_patch_on_large_variant_main_cannot_set_target_colour(self):
+  mask=np.zeros((400,400),dtype='uint8');mask[20:35,20:45]=255
+  with self.assertRaisesRegex(ValueError,'没有足够的可见衣料'):
+   ref.colour(Image.new('RGB',(400,400),'white'),Image.fromarray(mask))
 
 
 class AutomaticMigrationTests(unittest.TestCase):

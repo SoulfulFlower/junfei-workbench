@@ -11,6 +11,27 @@ import test_pixel_recolour as fixtures
 
 
 class AutomaticModelTests(unittest.TestCase):
+ def test_detached_headline_cannot_hide_a_full_garment_upper_body(self):
+  labels=np.zeros((160,160),'uint8');labels[2:18,25:135]=1
+  labels[50:110,55:110]=3;labels[110:155,50:115]=2
+  human=np.zeros_like(labels);human[50:110,55:110]=4;human[110:155,50:115]=6
+  mask,kind,_=auto.choose(labels,'upper',human)
+  self.assertEqual(kind,'upper');self.assertTrue(mask[80,80])
+  self.assertFalse(mask[8,80]);self.assertFalse(mask[135,80])
+ def test_no_foreground_after_protection_stops_before_grabcut(self):
+  from unittest.mock import patch
+  shape=(80,80);semantic=np.zeros(shape,bool);semantic[4:15,20:60]=True
+  domain=np.zeros(shape,bool);domain[35:70,25:55]=True
+  evidence={'foreground':[[40,8]],'clean':semantic,'protected':np.zeros(shape,bool),
+            'other':np.zeros(shape,bool),'distance':np.zeros(shape),'bodyDomain':domain}
+  with patch('cv2.grabCut') as grab,self.assertRaisesRegex(ValueError,'可靠前景与背景'):
+   auto.complete_edges(Image.new('RGB',(80,80),'white'),Image.fromarray(semantic.astype('uint8')*255),semantic,evidence,semantic.astype('uint8'),'upper',[[0,0]])
+  grab.assert_not_called()
+ def test_tunic_category_does_not_follow_visible_trousers(self):
+  for name in ('Women’s Corduroy Batwing Sleeve Tunic with Pockets', '灯芯绒蝙蝠袖罩衫'):
+   with self.subTest(name=name):
+    self.assertEqual(auto.category({'name':name}), 'upper')
+  self.assertEqual(auto.category({'name':'Corduroy Tunic Dress'}), 'full')
  def test_product_category_does_not_choose_models_trousers_for_a_top(self):
   for name,expected in [('女士罗纹上衣','upper'),('Womens blouse','upper'),('女士连衣裙','full'),('Wide leg pants','lower'),('半身裙','lower'),('未知','auto'),("Women's Stand Collar Half Zip Fleece Pullover with Pockets",'upper'),('Collared Cardigan','upper')]:self.assertEqual(auto.category({'name':name}),expected)
   labels=np.zeros((100,100),'uint8');labels[5:35,5:25]=1;labels[40:95,5:95]=2
@@ -27,6 +48,37 @@ class AutomaticModelTests(unittest.TestCase):
   human=np.zeros_like(labels);human[20:90,20:80]=4
   mask,_,_=auto.choose(labels,'upper',human)
   self.assertFalse(mask[60,55]);self.assertTrue(mask[30,55])
+ def test_distant_lower_uses_independent_pants_and_skirt_regions_without_coat(self):
+  labels=np.zeros((100,100),'uint8');labels[10:95,20:80]=3
+  human=np.zeros_like(labels);human[10:40,20:80]=4
+  human[40:70,20:80]=5;human[70:95,20:80]=6
+  mask,category,counts=auto.choose(labels,'lower',human)
+  self.assertEqual(category,'lower');self.assertEqual(counts,[0,0,5100])
+  np.testing.assert_array_equal(mask,np.isin(human,[5,6]))
+  self.assertFalse(mask[20,40])
+ def test_lower_fallback_rejects_dress_skin_and_conflicting_primary_upper(self):
+  labels=np.zeros((100,100),'uint8');labels[10:95,20:80]=3
+  labels[55:65,25:35]=1
+  human=np.zeros_like(labels);human[10:40,20:80]=7
+  human[40:85,20:80]=6;human[85:95,20:80]=12
+  mask,_,_=auto.choose(labels,'lower',human)
+  self.assertFalse(mask[20,40]);self.assertFalse(mask[90,40])
+  self.assertFalse(mask[60,30]);self.assertTrue(mask[70,40])
+ def test_lower_fallback_needs_a_substantial_independent_region(self):
+  labels=np.full((100,100),3,'uint8');human=np.zeros_like(labels)
+  sparse=human.copy();sparse[0,:49]=6
+  for layer in (human,sparse):
+   with self.assertRaises(ValueError):auto.choose(labels,'lower',layer)
+ def test_lower_outfit_fallback_protects_same_colour_jacket_and_arms(self):
+  labels=np.zeros((100,100),'uint8');labels[10:95,20:80]=3
+  human=np.zeros_like(labels);human[10:42,20:80]=4
+  human[42:95,20:80]=6
+  rgb=np.full((100,100,3),240,'uint8');rgb[labels==3]=[145,80,40]
+  semantic,_,_=auto.choose(labels,'lower',human)
+  evidence=auto.automatic_evidence(Image.fromarray(rgb),semantic,labels,human,'lower',Image.new('L',(100,100)))
+  self.assertTrue(evidence['protected'][20,50]);self.assertTrue(evidence['proposalProtection'][20,50])
+  self.assertTrue(evidence['other'][20,50]);self.assertFalse(evidence['clean'][20,50])
+  self.assertTrue(evidence['clean'][70,50]);self.assertFalse(evidence['protected'][70,50])
  def test_cropped_upper_has_deep_foreground_across_the_visible_garment(self):
   semantic=np.zeros((100,120),bool);semantic[10:90,10:108]=True
   semantic[10:90,55:64]=False
@@ -41,6 +93,29 @@ class AutomaticModelTests(unittest.TestCase):
  def test_blank_or_whole_image_segmentation_is_not_reported_as_success(self):
   for labels in (np.zeros((100,100),'uint8'),np.ones((100,100),'uint8')):
    with self.assertRaises(ValueError):auto.choose(labels,'upper')
+ def test_chromatic_crop_recovers_connected_cloth_without_skin_or_detached_artwork(self):
+  labels=np.zeros((160,160),'uint8');labels[:136,40:130]=1
+  labels[22:45,6:17]=1  # Incorrect coarse label on a same-colour logo.
+  rgb=np.full((160,160,3),235,'uint8');rgb[labels==1]=[115,11,30]
+  rgb[55:72,77:92]=[188,133,95]
+  human=np.zeros_like(labels);human[64:136,40:130]=4;human[55:72,77:92]=15
+  human[13:65,100:111]=2  # The cropped garment was mislabelled as hair.
+  protected=np.zeros_like(labels);protected[22:28,45:51]=255
+  source=Image.fromarray(rgb);cloth=labels==1
+  evidence=auto.automatic_evidence(source,cloth,labels,human,'upper',Image.fromarray(protected))
+  seed=np.zeros_like(cloth);seed[90:133,42:126]=True
+  recovered,_=auto.chromatic_fabric_recovery(rgb,seed,seed,evidence)
+  self.assertTrue(recovered[18,65]);self.assertTrue(recovered[23,106])
+  self.assertFalse(recovered[60,82]);self.assertFalse(recovered[24,48]);self.assertFalse(recovered[30,12]);self.assertFalse(recovered[60,27])
+ def test_chromatic_recovery_does_not_widen_body_domain_for_a_normal_inset_subject(self):
+  labels=np.zeros((160,160),'uint8');labels[15:148,45:125]=1
+  rgb=np.full((160,160,3),235,'uint8');rgb[labels==1]=[110,8,27]
+  human=np.zeros_like(labels);human[60:148,45:125]=4
+  source=Image.fromarray(rgb);cloth=labels==1
+  evidence=auto.automatic_evidence(source,cloth,labels,human,'upper',Image.new('L',source.size))
+  seed=np.zeros_like(cloth);seed[84:140,45:125]=True
+  recovered,_=auto.chromatic_fabric_recovery(rgb,seed,seed,evidence)
+  self.assertFalse(recovered[25,75]);self.assertTrue(recovered[72,75]);self.assertTrue(recovered[100,75])
  def test_automatic_pipeline_requires_no_user_points_and_respects_protection(self):
   labels=np.zeros((100,100),'uint8');labels[20:80,20:80]=1
   rgb=np.full((100,100,3),255,'uint8');rgb[20:80,20:80]=[80,40,50]

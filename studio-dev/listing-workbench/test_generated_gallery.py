@@ -15,6 +15,9 @@ import agent_center
 
 class GeneratedGalleryTests(unittest.TestCase):
     def setUp(self):
+        # Image transport/selection is isolated from composition in this suite.
+        gate=patch.object(delivery_export.image_composition,'require',return_value={'pass':True})
+        gate.start();self.addCleanup(gate.stop)
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)

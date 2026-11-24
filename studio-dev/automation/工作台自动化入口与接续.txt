@@ -1,0 +1,12 @@
+工作台当前入口与接续（笔记本试跑版2026-11-24）
+
+流程：核实商品及真实货源 → 真实竞品/关键词 → Listing → 原模板首色七图 → 完整颜色变体 → 正式图序及SKU检查 → ERP草稿回读 → 明确授权发布 → 原ID回查。
+Codex当前聊天负责总编排；工作台原生模块负责持久后台任务。跨阶段总控不是EXE自身的无人值守服务。
+文案：listing_jobs.py；作图：image_engine.py、generated_colour_variant.py；选区/质检：image_tools.py；正式图库：generated_gallery.py、colour_sets.py；ERP草稿：erp_collection.py；发布：publication_flow.py。
+任务中心 → 启动任务·配置店铺：保存每个账号独立的紫鸟/ERP/站点名称和顺序，版本与请求号防重复。GET/POST /api/agent/rotation-setup，按setupId可读原版本。名称待核验，保存不启动Codex或发布。
+原图选择：GET /api/image-engine/variants，POST /api/image-engine/prepare-variant-source；仅缓存真实已关联颜色图，提交sourceVariant:{receiptId}冻结颜色/实际子SKU/源文件SHA，不改正式母版或SKU图库。
+模板库240张原图与原文，修图24项完整配置。默认白底1、细节2、种草3、尺码1，种草不同人物/场景/展示方式，适用颜色共用真实尺码图。
+图片准备检查agent_image_preparation同时读取新旧生图、选区和质检台账；进行中、未知、中断或失败但模型意图未明时保留阻断，不轮询/重发。
+尚未统一：新版成图到正式图库/SKU的通用交接、全链持久自动轮转执行器、跨模块统一累计预算。保持既有正式交付检查，不通过修改状态绕过。
+店铺轮转由Codex按店铺轮转发布规则.txt及真实持久检查点编排；每店3款新商品，不按颜色尺码计数。试跑默认不启用循环，须核对本机目标和本次授权。
+所有路径、账号、工具登录、预算及店铺绑定使用笔记本真实配置。包内不带原机业务数据、密钥、浏览器登录或持续发布授权。

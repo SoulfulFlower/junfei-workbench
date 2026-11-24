@@ -1,11 +1,12 @@
 // Prepare an existing native copy. No upload, copy, exemption application or
 // publish occurs here. All writes use the ERP's observed json-update Save.
-import {schemaVariation,chooseCategory,resolveCategoryHints} from './ego-collection-prepare.mjs';
+import {schemaVariation,chooseCategory,resolveCategoryHints,sameCategoryPath,requestRecommendationsForSourceTitle} from './ego-collection-prepare.mjs';
 import {saveDraft} from './ego-draft-save.mjs';
 import {readPersistedDraft,verifyPersistedDraft,assertMainImageLocatorSchema} from './ego-draft-readback.mjs';
 import {verifyRemoteAsset} from './ego-draft-images.mjs';
 import {validateSchemaAttributes} from './ego-schema-validator.mjs';
 import {ensureUkBrandExemption} from './ego-uk-exemption.mjs';
+import {supplementUkCoat} from './ego-uk-coat-attributes.mjs';
 
 const clone=x=>JSON.parse(JSON.stringify(x));
 const present=x=>typeof x==='string'&&x.length>0;
@@ -118,6 +119,12 @@ export function migrateAttributes(attributes,meta,source,target){
  };
  for(const [key,value]of Object.entries(attributes||{})){
   if(['merchant_shipping_group','fulfillment_availability','supplier_declared_has_product_identifier_exemption','externally_assigned_product_identifier'].includes(key))continue;
+  // GB SKIRT omits the US department field; retain the same explicit female
+  // classification through its supported target_gender instead.
+  if(key==='department'&&!props?.department&&meta.product_type_name==='SKIRT'&&meta.country_code==='GB'&&
+     source.countryCode==='US'&&target.countryCode==='GB'&&props?.target_gender&&
+     Array.isArray(value)&&value.length===1&&value[0]?.value==='Womens'&&
+     attributes.target_gender?.length===1&&attributes.target_gender[0]?.value==='female')continue;
   if(!props?.[key])throw Error('英国schema不支持原商品属性 '+key);
   if(key==='list_price'&&props[key].items?.properties?.value_with_tax){
    const item=props[key].items,fields=item.properties,amount=resolve(fields.value_with_tax),currency=resolve(fields.currency);
@@ -149,7 +156,10 @@ function supplementUkMaterial(attributes,evidence,schema,target,resolve){
   const matches=values.filter(value=>typeof value==='string'&&value.toLowerCase()===text.toLowerCase());
   return matches.length===1?matches[0]:undefined;
  };
- const singleFiber=text=>/^[a-z][a-z -]*$/i.test(text)&&!/\b(?:blends?|mixed|mixture|polycotton)\b/i.test(text)?uniqueEnum(text):undefined;
+ const singleFiber=text=>{
+  if(!/^[a-z][a-z -]*$/i.test(text)||/\b(?:blends?|mixed|mixture|polycotton)\b/i.test(text))return;
+  return uniqueEnum(text)||(/^elastane$/i.test(text)?uniqueEnum('Spandex'):undefined);
+ };
  const text=sourceValue.trim();
  let value=singleFiber(text.replace(/^100%\s*/, '')),blendBasis;
  if(!value){
@@ -170,7 +180,7 @@ function supplementUkMaterial(attributes,evidence,schema,target,resolve){
 
 // Supplement the UK material type and the additional GB SHIRT requirements.
 // Evidence stays in the receipt, separate from Amazon-facing attribute values.
-export function supplementUkRequiredAttributes(attributes,input,meta,prepared){
+export function supplementUkRequiredAttributes(attributes,input,meta,prepared,categoryChoice){
  const result=clone(attributes||{}),evidence={};
  if(meta.country_code!=='GB')return{attributes:result,evidence};
  const target=prepared?.destination,shirt=meta.product_type_name==='SHIRT';
@@ -179,24 +189,131 @@ export function supplementUkRequiredAttributes(attributes,input,meta,prepared){
  const schema=schemaObject(meta),props=schema?.properties;
  const resolve=definition=>definition?.$ref?.startsWith('#/$defs/')?schema.$defs?.[definition.$ref.slice(8)]:definition;
  if(hasUkLocale&&schema?.$defs?.marketplace_id?.default===target.marketplaceId)supplementUkMaterial(result,evidence,schema,target,resolve);
- if(meta.product_type_name==='SWEATER'&&hasUkLocale&&/\bcardigan\b/i.test(input.goods?.title||'')){
+ if(meta.product_type_name==='COAT'){
+  const coat=supplementUkCoat(result,input,meta,prepared,categoryChoice);
+  return{attributes:coat.attributes,evidence:{...evidence,...coat.evidence}};
+ }
+ if(meta.product_type_name==='SWEATSHIRT'&&hasUkLocale&&schema?.$defs?.marketplace_id?.default===target.marketplaceId){
   const description=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
-  const materials=[...description.matchAll(/^Material:\s*([^\r\n]+)$/gm)];
-  if(/^Texture:\s*Knit\s*$/im.test(description)&&materials.length===1&&input.goods.manufacturer&&input.publicationFacts?.waterResistanceLevel){
+  const materials=[...description.matchAll(/^Material:[ \t]*([^\r\n]+)$/gm)];
+  const hoodedHalfZip=/^Style:[^\r\n]*\bhooded pullover\b/im.test(description)&&
+   /^Closure:[ \t]*Half[- ]zip[ \t]*\r?$/im.test(description)&&/^Hood:[ \t]*Drawstring(?: hood)?[ \t]*\r?$/im.test(description);
+  const halfZip=/^Style:[^\r\n]*\bhalf[- ]zip\b[^\r\n]*\bpullover\b/im.test(description)||hoodedHalfZip;
+  const fauxSuedeButtonPullover=/^Style:[^\r\n]*\bpullover\b/im.test(description)&&/^Front: Four-button half placket\s*$/im.test(description)&&
+   /^Faux suede made with polyester and elastane$/i.test(materials[0]?.[1].trim()??'');
+  if((halfZip||fauxSuedeButtonPullover)&&materials.length===1&&input.goods.manufacturer){
    const loc=value=>({value,language_tag:target.languageTag,marketplace_id:target.marketplaceId});
-   const attrs={item_type_name:[loc('Cardigan Sweater')],manufacturer:[loc(input.goods.manufacturer)],
-    ...(/\boversized\b/i.test(input.goods.title)&&props?.fit_type?{fit_type:[loc('Oversized')]}:{}),
-    outer:[{material:[{value:materials[0][1].trim(),language_tag:target.languageTag}],marketplace_id:target.marketplaceId}],
-    water_resistance_level:[{value:input.publicationFacts.waterResistanceLevel,marketplace_id:target.marketplaceId}],weave_type:[loc('Knit')]};
+   const outerMaterial=fauxSuedeButtonPullover?'Synthetic':materials[0][1].trim();
+   const attrs={item_type_name:[loc('Sweatshirt')],manufacturer:[loc(input.goods.manufacturer)],
+    outer:[{material:[{value:outerMaterial,language_tag:target.languageTag}],marketplace_id:target.marketplaceId}]};
+   const confirmation=input.ukPreparation?.sweatshirtWeave;
+   const supplierWeave=input.publicationFacts?.weaveTypeEvidence;
+   const mappedWeave=new Map([['针织','Knit'],['梭织','Woven']]);
+   const confirmed=confirmation?.source==='user_confirmation'&&confirmation.productId===input.productId&&
+    confirmation.sourceUrl===input.goods.sourceUrl&&['Knit','Woven'].includes(confirmation.value);
+   const supplied=supplierWeave?.source==='supplier_attribute'&&['织法','工艺'].includes(supplierWeave.field)&&
+    supplierWeave.sourceUrl===input.goods.sourceUrl&&mappedWeave.has(supplierWeave.sourceValue)&&
+    mappedWeave.get(supplierWeave.sourceValue)===supplierWeave.value;
+   const weave=confirmed?confirmation:supplierWeave;
+   if(confirmed||supplied){
+    const definition=resolve(props?.weave_type?.items?.properties?.value);
+    const accepts=definition?.enum?.includes(weave.value)||definition?.anyOf?.some(v=>v.enum?.includes(weave.value)||v.type==='string'&&!v.enum);
+    if(!accepts)throw Error('英国卫衣实际类目不接受已核实的织法');
+    attrs.weave_type=[loc(weave.value)];
+   }
    for(const [key,value] of Object.entries(attrs))if(!Object.hasOwn(result,key)){
     result[key]=value;
-    evidence[key]={source:'frozen_original_knit_cardigan',value:clone(value)};
+    evidence[key]=key==='weave_type'?clone(weave):{
+     source:fauxSuedeButtonPullover?'frozen_original_faux_suede_pullover':'frozen_original_half_zip_pullover',value:clone(value)};
    }
   }
   return{attributes:result,evidence};
  }
+ const sweaterDescription=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
+ const suppliedKnit=input.publicationFacts?.weaveTypeEvidence;
+ const modelEvidence=input.publicationFacts?.supplierModelNumberEvidence;
+ const sweaterLine=label=>{const rows=sweaterDescription.split(/\r?\n/).filter(row=>row.startsWith(label+':'));return rows.length===1?rows[0].slice(label.length+1).trim():'';};
+ const cowlBlend=sweaterLine('Material').match(/^(\d+)%\s*polyester,\s*(\d+)%\s*(?:spandex|elastane)$/i);
+ const ribbedCowlPullover=!sweaterLine('Style')&&/^Loose pullover shape$/i.test(sweaterLine('Fit'))&&
+  /^Fine vertical ribbing$/i.test(sweaterLine('Texture'))&&/^Deep draped cowl$/i.test(sweaterLine('Neckline'))&&
+  /\bcowl neck\b/i.test(input.goods?.title||'')&&/\bpullover\b/i.test(input.goods?.title||'')&&
+  cowlBlend&&Number(cowlBlend[1])+Number(cowlBlend[2])===100&&Number(cowlBlend[1])>50&&
+  /^https:\/\/detail\.1688\.com\/offer\/\d+\.html$/.test(input.goods?.sourceUrl||'')&&
+  modelEvidence?.source==='supplier_attribute'&&modelEvidence.sourceUrl===input.goods.sourceUrl&&
+  Boolean(input.publicationFacts?.supplierModelNumber)&&modelEvidence.value===input.publicationFacts.supplierModelNumber&&
+  (!suppliedKnit||['Knit','Rib'].includes(suppliedKnit.value))&&
+  input.publicationFacts?.waterResistanceLevelSource?.basis?.classification==='ordinary_apparel';
+ const acrylicJacquardPullover=/^Style:[^\r\n]*\bknitted\s+pullover\b/im.test(sweaterDescription)&&
+  /^Material:\s*100%\s*acrylic\s*$/im.test(sweaterDescription)&&/\bjacquard\b/i.test(input.goods?.title||'')&&
+  /^https:\/\/detail\.1688\.com\/offer\/\d+\.html$/.test(input.goods?.sourceUrl||'')&&
+  modelEvidence?.source==='supplier_attribute'&&modelEvidence.sourceUrl===input.goods.sourceUrl&&
+  Boolean(input.publicationFacts?.supplierModelNumber)&&modelEvidence.value===input.publicationFacts.supplierModelNumber&&
+  (!suppliedKnit||['Knit','Jacquard'].includes(suppliedKnit.value))&&
+  input.publicationFacts?.waterResistanceLevelSource?.basis?.classification==='ordinary_apparel';
+ const knitPullover=/^Style:[^\r\n]*\bpullover\b/im.test(sweaterDescription)&&
+  /^Material:\s*Polyester-rich rib knit\s*$/im.test(sweaterDescription)&&suppliedKnit?.source==='supplier_attribute'&&
+  suppliedKnit.value==='Knit'&&suppliedKnit.sourceUrl===input.goods?.sourceUrl||acrylicJacquardPullover||ribbedCowlPullover;
+ if(meta.product_type_name==='SWEATER'&&hasUkLocale&&(/\bcardigan\b/i.test(input.goods?.title||'')||knitPullover)){
+  const description=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
+  const materials=[...description.matchAll(/^Material:\s*([^\r\n]+)$/gm)];
+  if((/^Texture:\s*Knit\s*$/im.test(description)||knitPullover)&&materials.length===1&&input.goods.manufacturer&&input.publicationFacts?.waterResistanceLevel){
+   const loc=value=>({value,language_tag:target.languageTag,marketplace_id:target.marketplaceId});
+   const weave=acrylicJacquardPullover?'Jacquard':ribbedCowlPullover?'Rib':'Knit';
+   if(acrylicJacquardPullover||ribbedCowlPullover){
+    const value=resolve(props?.weave_type?.items?.properties?.value),choices=value?.enum??value?.anyOf?.flatMap(branch=>branch.enum??[])??[];
+    if(!choices.includes(weave))throw Error('英国毛衣实际schema没有已核实的'+weave+'选项');
+   }
+   if(ribbedCowlPullover){const value=resolve(props?.outer?.items?.properties?.material?.items?.properties?.value),choices=value?.enum??value?.anyOf?.flatMap(branch=>branch.enum??[])??[];if(!choices.includes('Synthetic'))throw Error('英国毛衣实际schema没有Synthetic选项');}
+   const attrs={item_type_name:[loc(knitPullover?'Pullover Sweater':'Cardigan Sweater')],manufacturer:[loc(input.goods.manufacturer)],
+    ...(/\boversized\b/i.test(input.goods.title)&&props?.fit_type?{fit_type:[loc('Oversized')]}:{}),
+    outer:[{material:[{value:ribbedCowlPullover?'Synthetic':materials[0][1].trim(),language_tag:target.languageTag}],marketplace_id:target.marketplaceId}],
+    water_resistance_level:[{value:input.publicationFacts.waterResistanceLevel,marketplace_id:target.marketplaceId}],weave_type:[loc(weave)]};
+   for(const [key,value] of Object.entries(attrs))if(!Object.hasOwn(result,key)){
+    result[key]=value;
+    evidence[key]={source:knitPullover?'frozen_original_knit_pullover':'frozen_original_knit_cardigan',value:clone(value)};
+    if(acrylicJacquardPullover)evidence[key]={source:key==='weave_type'?'inferred_workbench_classification':'frozen_original_acrylic_knitted_pullover',
+     value:clone(value),humanReviewed:false,...(key==='weave_type'?{supplierVerified:false,rule:'explicit_jacquard_design_catalogue_classification',
+      basis:{title:input.goods.title,style:sweaterDescription.match(/^Style:\s*([^\r\n]+)$/im)?.[1],supplierModelNumberEvidence:clone(modelEvidence)}}:{})};
+    if(ribbedCowlPullover)evidence[key]={source:['weave_type','outer','item_type_name'].includes(key)?'inferred_workbench_classification':'frozen_original_cowl_pullover',
+     value:clone(value),humanReviewed:false,supplierVerified:false,rule:'source_bound_polyester_spandex_ribbed_cowl_pullover',
+     basis:{material:sweaterLine('Material'),texture:sweaterLine('Texture'),fit:sweaterLine('Fit'),neckline:sweaterLine('Neckline'),supplierModelNumberEvidence:clone(modelEvidence)},
+     note:'Catalogue classification from frozen source-bound product lines; original fabric percentages unchanged; not factory weave certification.'};
+   }
+  }
+  return{attributes:result,evidence};
+ }
+ if(meta.product_type_name==='SKIRT'&&hasUkLocale&&schema?.$defs?.marketplace_id?.default===target.marketplaceId){
+  const description=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
+  const material=[...description.matchAll(/^Material:[ \t]*([^\r\n]+)$/gm)];
+  const style=[...description.matchAll(/^Style:[ \t]*([^\r\n]*\bmini skirt\b[^\r\n]*)$/gim)];
+  if(!sameCategoryPath(target.categoryHints?.path||'','Fashion > Women > Clothing > Skirts')||material.length!==1||style.length!==1)return{attributes:result,evidence};
+  const loc=value=>({value,language_tag:target.languageTag,marketplace_id:target.marketplaceId});
+  const choice=(key,value)=>{const d=resolve(props?.[key]?.items?.properties?.value),values=d?.enum??d?.anyOf?.flatMap(branch=>branch.enum??[])??[];if(!values.includes(value))throw Error('英国短裙类目没有有效属性 '+key);return value;};
+  const attrs={item_type_name:[loc(choice('item_type_name','Skirt'))]};
+  if(input.goods.manufacturer&&props.manufacturer)attrs.manufacturer=[loc(input.goods.manufacturer)];
+  if(props.outer?.items?.properties?.material)attrs.outer=[{material:[{value:material[0][1].trim(),language_tag:target.languageTag}],marketplace_id:target.marketplaceId}];
+  // The source confirms base-fabric composition, not a separate lining.
+  // Keep that distinction explicit in the native free-text material field.
+  const inner=props.inner?.items,innerValue=inner?.properties?.material?.items?.properties?.value;
+  const liningText='Base fabric: '+material[0][1].trim()+'; separate lining not specified';
+  if(!Object.hasOwn(result,'inner')&&inner?.properties?.marketplace_id&&innerValue?.type==='string'&&
+     !innerValue.enum&&(!innerValue.maxLength||liningText.length<=innerValue.maxLength)){
+   attrs.inner=[{material:[{value:liningText,language_tag:target.languageTag}],marketplace_id:target.marketplaceId}];
+  }
+  const weave=input.publicationFacts?.weaveTypeEvidence;
+  if(weave?.source==='user_configured_defaults'&&weave.productId===input.productId&&weave.scope==='missing_catalogue_attribute_only'&&
+     weave.supplierVerified===false&&weave.value==='Plain'&&weave.configuredAt&&typeof weave.instruction==='string'&&weave.instruction.trim())attrs.weave_type=[loc(choice('weave_type',weave.value))];
+  for(const [key,value] of Object.entries(attrs))if(!Object.hasOwn(result,key)){
+   result[key]=value;evidence[key]=key==='weave_type'?clone(weave):{source:key==='inner'?'frozen_base_fabric_with_explicit_unspecified_lining':key==='item_type_name'?'verified_category_mapping':'frozen_original_product_facts',value:clone(value),humanReviewed:false,...(key==='inner'?{separateLiningVerified:false,sourcePath:'goods.description/Material'}: {})};
+  }
+  return{attributes:result,evidence};
+ }
  if(meta.product_type_name==='PANTS'&&hasUkLocale){
-  const weave=input.ukPreparation?.pantsWeave, path=target.categoryHints?.path;
+  const configured=input.publicationFacts?.weaveTypeEvidence;
+  const sellerDefault=configured?.source==='user_configured_defaults'&&configured.productId===input.productId&&
+    configured.scope==='missing_catalogue_attribute_only'&&configured.value==='Plain'&&configured.supplierVerified===false&&
+    typeof configured.instruction==='string'&&configured.instruction.trim()&&configured.configuredAt;
+  const weave=input.ukPreparation?.pantsWeave||(sellerDefault?configured:null), path=target.categoryHints?.path;
   const description=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
   const material=[...description.matchAll(/^Material:\s*([^\r\n]+)$/gm)];
   const style=[...description.matchAll(/^Style:[^\r\n]*\bwide-leg\b[^\r\n]*$/gim)];
@@ -209,14 +326,14 @@ export function supplementUkRequiredAttributes(attributes,input,meta,prepared){
   };
   const p=key=>props?.[key]?.items?.properties;
   const attrs={item_type_name:[loc(choice(p('item_type_name')?.value,'Pants'))],
-   ...(weave.value==='Satin'&&p('fit_type')?.value?{fit_type:[loc(choice(p('fit_type').value,'Flowy'))]}:{}),
+   ...(p('fit_type')?.value?{fit_type:[loc(choice(p('fit_type').value,weave.value==='Satin'?'Flowy':'Loose'))]}:{}),
    leg:[{style:[{value:choice(p('leg')?.style?.items?.properties?.value,'Wide'),language_tag:target.languageTag}],marketplace_id:target.marketplaceId}],
    manufacturer:[loc(input.goods.manufacturer)],outer:[{material:[{value:material[0][1].trim(),language_tag:target.languageTag}],marketplace_id:target.marketplaceId}],
    water_resistance_level:[{value:choice(p('water_resistance_level')?.value,input.publicationFacts?.waterResistanceLevel),marketplace_id:target.marketplaceId}],
    weave_type:[loc(choice(p('weave_type')?.value,weave.value))]};
   for(const [key,value] of Object.entries(attrs))if(!Object.hasOwn(result,key)){
    result[key]=value;
-   evidence[key]=key==='weave_type'?clone(weave):key==='fit_type'?{source:'verified_satin_wide_leg_classification',value:clone(value)}:{source:'frozen_original_product_facts',value:clone(value)};
+   evidence[key]=key==='weave_type'?clone(weave):key==='fit_type'?{source:weave.value==='Satin'?'verified_satin_wide_leg_classification':'inferred_workbench_classification',inferred:true,rule:'ordinary_women_wide_leg_trousers_fit',sourceFields:{style:style[0][0]},value:clone(value),humanReviewed:false,note:'Catalogue fit classification from the frozen wide-leg style; not supplier literal text.'}:{source:'frozen_original_product_facts',value:clone(value)};
   }
   return{attributes:result,evidence};
  }
@@ -232,6 +349,42 @@ export function supplementUkRequiredAttributes(attributes,input,meta,prepared){
   return[{value,language_tag:target.languageTag,marketplace_id:target.marketplaceId}];
  };
  const known=(key,value,basis)=>{if(Object.hasOwn(result,key)){evidence[key]={value:clone(result[key]),source:'original_migrated_attribute'};return;}result[key]=localized(key,value);evidence[key]={value, ...basis};};
+ const construction=input.ukPreparation?.corduroyConstruction;
+ const corduroyTunic=construction?.source==='supplier_attribute'&&construction.productId===input.productId&&
+  construction.sourceUrl===input.goods.sourceUrl&&construction.sourceUrl===input.publicationFacts?.supplierModelNumberEvidence?.sourceUrl&&
+  construction.schemaHash===meta.hash&&construction.categoryValue===categoryChoice?.value&&
+  /\bBlouses\s*$/i.test(categoryChoice?.text||'')&&construction.supplierValues?.weave==='梭织'&&
+  construction.supplierValues?.fabric==='灯芯绒'&&construction.supplierValues?.neckline==='圆领'&&
+  construction.supplierValues?.composition==='涤纶（聚酯纤维）:100%'&&/^crew neck$/i.test(field('Neckline')||'')&&
+  /\btunic\b/i.test(input.goods?.title||'')&&/^100% polyester corduroy$/i.test(field('Material')||'');
+ if(corduroyTunic){
+  known('collar_style','Collarless',{source:'verified_crew_neck_tunic',supplier:clone(construction)});
+  known('item_type_name','Tunic Shirt',{source:'verified_category_mapping',category:categoryChoice.text});
+  known('weave_type','Woven',{source:'supplier_attribute',basis:clone(construction)});
+  if(props?.material)known('material','Polyester',{source:'supplier_attribute',basis:clone(construction)});
+ }
+ // Ordinary women's blouses have their own verified taxonomy leaf. Crew-neck
+ // pullover construction and the bound supplier's weave supply missing facts;
+ // neither a T-shirt classification nor a guessed weave is needed.
+ const sourceBlousePath=input.destination?.categoryHints?.path;
+ const ordinaryBlouse=hasUkLocale&&schema?.$defs?.marketplace_id?.default===target.marketplaceId&&
+  /^Clothing,? Shoes & Jewelry\s*>\s*Women\s*>\s*Clothing\s*>\s*Tops,? Tees & Blouses\s*>\s*Blouses & Button-Down Shirts\s*>\s*Blouses$/i.test(sourceBlousePath||'')&&
+  /^Fashion Women Clothing Tops T-Shirts & Blouses Blouses & Shirts Blouses$/i.test(categoryChoice?.text||'')&&
+  typeof categoryChoice?.value==='string'&&/^\d+(?:,\d+)+$/.test(categoryChoice.value)&&
+  /^crew\s+neck$/i.test(field('Neckline')||'')&&/\bpullover\b/i.test(field('Style')||'')&&
+  !/\bpolo\b|\bfold(?:ed)?[ -]?collar\b|\bturn[ -]?down\b|\bbutton[ -]?(?:down|collar)\b|\bstand(?:ing)?[ -]?collar\b|\bmandarin\b|\bshirt[ -]?collar\b|\bturtle(?:neck)?\b|\bmock[ -]?neck\b/i.test(description);
+ if(ordinaryBlouse){
+  known('collar_style','Collarless',{source:'inferred_workbench_classification',inferred:true,
+   rule:'crew_neck_pullover_blouse_no_folded_collar_v1',sourcePath:sourceBlousePath,targetCategory:clone(categoryChoice),
+   sourceFields:{neckline:field('Neckline'),style:field('Style')},note:'Construction classification; not supplier literal text'});
+  known('item_type_name','Blouse',{source:'verified_category_mapping',sourcePath:sourceBlousePath,targetCategory:clone(categoryChoice)});
+  const weave=input.publicationFacts?.weaveTypeEvidence;
+  const mapped=new Map([['针织','Knit'],['梭织','Woven']]);
+  if(weave?.source==='supplier_attribute'&&['织法','工艺'].includes(weave.field)&&weave.sourceUrl===input.goods.sourceUrl&&
+    weave.sourceUrl===input.publicationFacts?.supplierModelNumberEvidence?.sourceUrl&&mapped.get(weave.sourceValue)===weave.value&&mapped.has(weave.sourceValue)){
+   known('weave_type',weave.value,{source:'supplier_attribute',basis:clone(weave)});
+  }
+ }
  if(!Object.hasOwn(result,'manufacturer')){
   const value=input.goods?.manufacturer;if(typeof value!=='string'||!value.trim())fail('manufacturer','冻结goods.manufacturer为空，未补Generic');
   known('manufacturer',value,{source:'frozen_goods',path:'goods.manufacturer'});
@@ -316,11 +469,25 @@ async function pickOption(page,text,inputSelector){
  throw Error('英国选项键盘定位失败：'+text);
 }
 
-export async function readUkPage(page,expected){
- await page.waitForFunction(()=>document.querySelector('input[placeholder="店铺"]')?.value&&document.querySelector('input[placeholder="产品标题"]')?.value&&document.querySelector('input[placeholder="亚马逊运输模板"]')?.value&&[...document.querySelectorAll('.el-table__body-wrapper tr')].some(r=>r.querySelector('input[placeholder="sku"]')),undefined,{timeout:20000});
- if(expected)await page.waitForFunction(p=>{const rows=[...document.querySelectorAll('.el-table__body-wrapper tr')].filter(r=>r.querySelector('input[placeholder="sku"]'));return document.querySelector('input[placeholder="店铺"]')?.value===p.store&&document.querySelector('input[placeholder="品牌"]')?.closest('.el-form-item')?.innerText.includes('UPC豁免：允许销售')&&rows.length===p.count&&rows.every(r=>/\bGBP\b/.test(r.innerText));},{store:expected.store,count:expected.goodsItems.length},{timeout:20000});
+async function ukShippingSelector(page){
  return page.evaluate(()=>{
-  const shippingInput=document.querySelector('input[placeholder="亚马逊运输模板"]'),selectedId=shippingInput?.closest('.el-select')?.__vue__?.value;
+  const visible=e=>e.getBoundingClientRect().width>0&&getComputedStyle(e).visibility==='visible';
+  const labels=[...document.querySelectorAll('label.el-form-item__label')].filter(e=>visible(e)&&e.innerText.trim()==='配送模板');
+  if(labels.length!==1)throw Error('英国配送模板标签未唯一匹配');
+  const inputs=[...(labels[0].closest('.el-form-item')?.querySelectorAll('.el-select input.el-input__inner')||[])].filter(visible);
+  if(inputs.length!==1)throw Error('英国配送模板控件未唯一匹配');
+  inputs[0].setAttribute('data-studio-uk-shipping','true');
+  return 'input[data-studio-uk-shipping="true"]';
+ });
+}
+
+export async function readUkPage(page,expected){
+ await page.waitForFunction(()=>document.querySelector('input[placeholder="店铺"]')?.value&&document.querySelector('input[placeholder="产品标题"]')?.value&&[...document.querySelectorAll('.el-table__body-wrapper tr')].some(r=>r.querySelector('input[placeholder="sku"]')),undefined,{timeout:20000});
+ const shipping=await ukShippingSelector(page);
+ await page.waitForFunction(selector=>document.querySelector(selector)?.value,shipping,{timeout:20000});
+ if(expected)await page.waitForFunction(p=>{const rows=[...document.querySelectorAll('.el-table__body-wrapper tr')].filter(r=>r.querySelector('input[placeholder="sku"]'));return document.querySelector('input[placeholder="店铺"]')?.value===p.store&&document.querySelector('input[placeholder="品牌"]')?.closest('.el-form-item')?.innerText.includes('UPC豁免：允许销售')&&rows.length===p.count&&rows.every(r=>/\bGBP\b/.test(r.innerText));},{store:expected.store,count:expected.goodsItems.length},{timeout:20000});
+ return page.evaluate(selector=>{
+  const shippingInput=document.querySelector(selector),selectedId=shippingInput?.closest('.el-select')?.__vue__?.value;
   const shippingTemplateId=typeof selectedId==='string'&&selectedId?selectedId:null;
   return{url:location.href,store:document.querySelector('input[placeholder="店铺"]')?.value,
   parentSku:document.querySelector('input[placeholder^="父Sku,"]')?.value,brand:document.querySelector('input[placeholder="品牌"]')?.value,
@@ -328,7 +495,7 @@ export async function readUkPage(page,expected){
   shippingTemplate:shippingInput?.value,shippingTemplateId,
   handlingDays:document.querySelector('input[placeholder="处理时间"]')?.value,
   currencies:[...document.querySelectorAll('.el-table__body-wrapper tr')].filter(r=>r.querySelector('input[placeholder="sku"]')).map(r=>r.innerText.match(/\b(?:GBP|USD|EUR)\b/g)||[])};
- });
+ },shipping);
 }
 
 function verifyUkUi(ui,prepared){
@@ -367,12 +534,27 @@ export function verifyUkDraft(response,prepared,urls,ui){
  verifyUkUi(ui,prepared);return checks;
 }
 
-export async function chooseUkRecommendedCategory(candidates,input,record,persist){
+export async function chooseUkRecommendedCategory(candidates,input,record,persist,recommendationTitle=input.goods.title){
  const t=preparationTarget(input),hints=resolveCategoryHints(t.categoryHints,input.categoryHints,input.destination.categoryHints);
  if(record.categoryRecommendation)(record.categoryRecommendationHistory??=[]).push(record.categoryRecommendation);
  delete record.categoryChoice;
- record.categoryRecommendation={observedAt:new Date().toISOString(),draftId:String(record.draftId),store:t.storeName,countryCode:'GB',candidates:clone(candidates),hints:clone(hints),title:input.goods.title};await persist();
- const selected=chooseCategory(candidates,hints,input.goods.title);
+ record.categoryRecommendation={observedAt:new Date().toISOString(),draftId:String(record.draftId),store:t.storeName,countryCode:'GB',candidates:clone(candidates),hints:clone(hints),title:recommendationTitle};await persist();
+ if(recommendationTitle!==input.goods.title&&candidates.filter(row=>sameCategoryPath(row.text,t.categoryHints?.path)).length!==1)
+  throw Error('英国 ERP 重新识别后仍未找到唯一的已核实类目');
+ // US Pullovers and the actual GB women's Jumpers leaf describe the same
+ // ordinary pullover family. Never substitute maternity/sport/sleeveless nodes.
+ const description=String(input.goods?.description||'').replace(/<br\s*\/?\s*>/gi,'\n');
+ let categoryHints=hints;
+ if(/^Clothing, Shoes & Jewelry\s*>\s*Women\s*>\s*Clothing\s*>\s*Sweaters\s*>\s*Pullovers$/i.test(hints.path||'')&&
+    record.sourceEvidence?.country_code==='US'&&record.sourceEvidence?.product_type_name==='SWEATER'&&
+    /^Style:[^\r\n]*\bpullover\b/im.test(description)){
+  const matches=candidates.filter(row=>/^Fashion\s+Women\s+Clothing\s+Jumpers\s+Cardigans\s*&\s*Sweatshirts\s+Jumpers$/i.test(row.text.trim()));
+  if(matches.length!==1)throw Error('英国普通女士Jumpers节点缺失或有歧义，保留原草稿');
+  categoryHints={...hints,path:matches[0].text};
+  record.categoryMapping={source:'verified_us_pullover_to_observed_uk_jumpers',sourcePath:hints.path,
+   sourceProductType:'SWEATER',targetPath:matches[0].text,targetValue:matches[0].value,humanReviewed:false};await persist();
+ }
+ const selected=chooseCategory(candidates,categoryHints,input.goods.title);
  if(typeof selected.value!=='string'||!selected.value.trim())throw Error('英国类目推荐未读到原生节点编号，保留候选待核对');
  record.categoryChoice=selected;await persist();return selected;
 }
@@ -472,6 +654,21 @@ export async function openUkCategoryRecommendations(page){
  await page.waitForFunction(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"] label.el-radio')].some(row=>row.getBoundingClientRect().width),undefined,{timeout:20000});
 }
 
+export function ukCategoryRadioReady(selected){
+ const dialog=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);
+ if(!dialog)return false;
+ const rows=[...dialog.querySelectorAll('label.el-radio')],checked=rows.filter(e=>e.querySelector('input')?.checked&&e.classList.contains('is-checked')&&e.getAttribute('aria-checked')==='true');
+ const row=checked[0],text=row?.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim();
+ if(checked.length!==1||row.querySelector('input').value!==selected.value||text!==selected.text){for(const item of rows)item.__ukCategoryReadyState=null;return false;}
+ const key=JSON.stringify([selected.value,text]);row.__ukCategoryReadyState=row.__ukCategoryReadyState?.key===key?{key,count:row.__ukCategoryReadyState.count+1}:{key,count:1};
+ return row.__ukCategoryReadyState.count>=3;
+}
+
+export function ukCategoryPathVisible(selected){
+ const block=document.querySelector('.el-form-item#product-attr-product_type');
+ return Boolean(block?.getBoundingClientRect().width&&block.innerText.replace(/\s+/g,' ').includes(selected.text));
+}
+
 async function prepareUkPage(page,input,record,persist){
  const t=preparationTarget(input),url='https://www.junfeikuajing.com/#/amazon/product/'+record.draftId+'?type=draft';if(await page.url()===url)await page.reload();else await page.goto(url);
  await page.waitForSelector('input[placeholder="店铺"]',{state:'visible'});
@@ -483,15 +680,32 @@ async function prepareUkPage(page,input,record,persist){
   // Choosing a real UK category forces the country's schema, even when the
   // source category name happens to be identical.
   await openUkCategoryRecommendations(page);
-  const candidates=await page.evaluate(()=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);return [...d.querySelectorAll('label.el-radio')].map((e,index)=>({index,text:e.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim(),value:e.querySelector('input')?.value}));});
-  const selected=await chooseUkRecommendedCategory(candidates,input,record,persist);
-  const selector=await page.evaluate(selected=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);const e=d?.querySelectorAll('label.el-radio')[selected.index],text=e?.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim();if(!e||e.querySelector('input')?.value!==selected.value||text!==selected.text)throw Error('英国类目列表或节点变化');e.setAttribute('data-uk-category','true');e.scrollIntoView({block:'center',inline:'nearest'});return e.querySelector('.el-radio__input')?'[data-uk-category] .el-radio__input':'[data-uk-category]';},selected);
-  await page.click(selector);await page.click('[role=dialog][aria-label="亚马逊产品类型推荐"] .el-dialog__footer button:has-text("确定")');
+  const readRecommendations=async browser=>{
+   await browser.waitForFunction(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"] label.el-radio')].some(row=>row.getBoundingClientRect().width),undefined,{timeout:20000});
+   return browser.evaluate(()=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);return [...d.querySelectorAll('label.el-radio')].map((e,index)=>({index,text:e.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim(),value:e.querySelector('input')?.value}));});
+  };
+  let candidates=await readRecommendations(page),recommendationTitle=input.goods.title;
+  const targetPath=t.categoryHints?.path,sourceTitle=input.destination.categoryHints?.title||input.categoryHints?.title;
+  if(targetPath&&sourceTitle&&!sameCategoryPath(sourceTitle,input.goods.title)&&
+     !candidates.some(row=>sameCategoryPath(row.text,targetPath))){
+   recommendationTitle=sourceTitle;
+   candidates=await requestRecommendationsForSourceTitle(page,sourceTitle,input.goods.title,readRecommendations);
+  }
+  const selected=await chooseUkRecommendedCategory(candidates,input,record,persist,recommendationTitle);
+  const selector=await page.evaluate(selected=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);const e=d?.querySelectorAll('label.el-radio')[selected.index],text=e?.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim();if(!e||e.querySelector('input')?.value!==selected.value||text!==selected.text)throw Error('英国类目列表或节点变化');e.setAttribute('data-uk-category','true');e.scrollIntoView({block:'center',inline:'nearest'});return '[data-uk-category]';},selected);
+  await page.click(selector);
+  await page.waitForFunction(ukCategoryRadioReady,selected,{timeout:10000});
+  record.categorySelectionObservation={value:selected.value,text:selected.text,radioChecked:true,observedAt:new Date().toISOString()};await persist();
+  await page.click('[role=dialog][aria-label="亚马逊产品类型推荐"] .el-dialog__footer button:has-text("确定")');
+  await page.waitForFunction(ukCategoryPathVisible,selected,{timeout:10000});
+  record.categorySelectionObservation.visiblePathVerifiedAt=new Date().toISOString();await persist();
  });
+ record.schemaObservation=clone(meta);await persist();
  const prepared=makeUkInput(input,record.draftId,meta);
  await page.evaluate(p=>{const set=(e,v)=>{if(!e)throw Error('英国字段缺失');Object.getOwnPropertyDescriptor(e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(e,String(v));e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));};set(document.querySelector('input[placeholder="品牌"]'),p.goods.brand);set(document.querySelector('input[placeholder="处理时间"]'),p.handlingDays);},prepared);
- await page.evaluate(()=>{const e=document.querySelector('input[placeholder="亚马逊运输模板"]');if(!e)throw Error('英国运输模板控件变化');e.scrollIntoView({block:'center',inline:'nearest'});});
- await page.click('input[placeholder="亚马逊运输模板"]');await page.waitForFunction(name=>[...document.querySelectorAll('.el-select-dropdown li')].some(e=>e.getBoundingClientRect().width&&e.innerText.trim()===name),t.shippingTemplate.name,{timeout:10000});await pickOption(page,t.shippingTemplate.name,'input[placeholder="亚马逊运输模板"]');
+ const shipping=await ukShippingSelector(page);
+ await page.evaluate(selector=>{const e=document.querySelector(selector);if(!e)throw Error('英国运输模板控件变化');e.scrollIntoView({block:'center',inline:'nearest'});},shipping);
+ await page.click(shipping);await page.waitForFunction(name=>[...document.querySelectorAll('.el-select-dropdown li')].some(e=>e.getBoundingClientRect().width&&e.innerText.trim()===name),t.shippingTemplate.name,{timeout:10000});await pickOption(page,t.shippingTemplate.name,shipping);
  const exemption=await ensureUkBrandExemption(page,prepared,record,persist,{schemaObservation:meta});
  if(!prepared.destination.marketId)prepared.destination.marketId=exemption.nativeMarketId;
  return {meta,prepared,ui:await readUkPage(page,prepared)};
@@ -577,7 +791,7 @@ export async function prepareUkDraft(page,input,record,persist,adapters={}){
   const {brand,variation_theme,main_product_image_locator,...facts}=attributes||{};
   const migrated={...migrateAttributes(facts,staged.meta,input.destination,p.destination),...clone(targetIdentityAttributes)};
   record.requiredAttributeEvidence??={};
-  try{const supplemented=supplementUkRequiredAttributes(migrated,input,staged.meta,p);record.requiredAttributeEvidence[sku]=supplemented.evidence;return supplemented.attributes;}
+  try{const supplemented=supplementUkRequiredAttributes(migrated,input,staged.meta,p,record.categoryChoice);record.requiredAttributeEvidence[sku]=supplemented.evidence;return supplemented.attributes;}
   catch(error){if(error.ukRequiredAttributeEvidence)record.requiredAttributeEvidence[sku]=error.ukRequiredAttributeEvidence;throw error;}
  };
  let parentAttrs;const itemAttrs={};

@@ -28,115 +28,7 @@ let listingTextProvider='文案服务';
 function syncLabel(text){let el=document.getElementById('serverStatus');if(!el){el=document.createElement('span');el.id='serverStatus';el.className='badge';document.querySelector('header .user').prepend(el)}el.textContent=text}
 persist=function(options){basePersist();if(options?.invalidateReview!==false)invalidateReview();if(serverReady&&!syncConflict){syncPending=true;syncLabel('有修改待保存');clearTimeout(syncTimer);syncTimer=setTimeout(pushState,450)}};
 function invalidateReview(){const p=product();if(p&&p.status==='已通过'&&view!=='reviews'){p.status='需修改';state.reviews[p.id]={copy:false,images:false,note:'审核通过后内容发生变化，请重新确认'};basePersist()}}
-let savedWorkspace, savedWorkspaceRevision;
-function workspaceChanges(before, after){
- const changes=[];
- const compare=(scope, oldRecords, newRecords)=>{
-  for(const key of new Set([...newRecords.keys(),...oldRecords.keys()])){
-   const oldValue=oldRecords.has(key)?[oldRecords.get(key)]:[];
-   const newValue=newRecords.has(key)?[newRecords.get(key)]:[];
-   if(JSON.stringify(oldValue)!==JSON.stringify(newValue))changes.push({scope,key,before:oldValue,after:newValue});
-  }
- };
- const products=value=>new Map(value.products.map(p=>[p.id,p]));
- compare('products',products(before),products(after));
- for(const scope of ['copy','reviews'])compare(scope,new Map(Object.entries(before[scope])),new Map(Object.entries(after[scope])));
- const metadata=value=>new Map(Object.entries(value).filter(([key])=>!['products','copy','reviews'].includes(key)));
- compare('workspace',metadata(before),metadata(after));
- return changes;
-}
-function keepEdits(workspace, changes){
- for(const {scope,key,after} of changes){
-  if(scope==='products'){
-   const index=workspace.products.findIndex(product=>product.id===key);
-   if(after.length&&index===-1)workspace.products.unshift(after[0]);
-   else if(after.length)workspace.products[index]=after[0];
-   else if(index!==-1)workspace.products.splice(index,1);
-  }else{
-   const records=scope==='workspace'?workspace:workspace[scope];
-   if(after.length)Object.defineProperty(records,key,{value:after[0],writable:true,enumerable:true,configurable:true});
-   else delete records[key];
-  }
- }
- return workspace;
-}
-async function workspaceResponse(response){
- if(response.status===413)throw Error('请求超过服务器大小限制，请缩小修改范围或下载备份');
- if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('服务器返回异常，请稍后重试');
- return response.json();
-}
-function acceptWorkspace(data,snapshot){
- const newEdits=workspaceChanges(snapshot,state);
- serverRevision=data.revision;
- savedWorkspace=structuredClone(data.state||snapshot);
- savedWorkspaceRevision=data.state?data.revision:undefined;
- if(!data.state)return;
- const currentByRecord=new Map(workspaceChanges(snapshot,data.state).map(change=>[
-  JSON.stringify([change.scope,change.key]),change.after
- ]));
- // Retain the original comparison value when a remote update raced an edit made during the request.
- const overlaps=newEdits.filter(change=>{
-  const remote=currentByRecord.get(JSON.stringify([change.scope,change.key]));
-  return remote&&JSON.stringify(remote)!==JSON.stringify(change.after);
- });
- keepEdits(savedWorkspace,overlaps.map(change=>({...change,after:change.before})));
- const merged=keepEdits(data.state,newEdits);
- // Keep the model objects referenced by currently mounted form handlers.
- const existing=new Map(state.products.map(product=>[product.id,product]));
- merged.products=merged.products.map(product=>{
-  const current=existing.get(product.id);
-  if(!current||JSON.stringify(current)===JSON.stringify(product))return current||product;
-  for(const key of Object.keys(current))if(!Object.hasOwn(product,key))delete current[key];
-  return Object.assign(current,product);
- });
- state=merged;
- basePersist();
- if(view==='products')drawRows();
-}
-async function saveNewProduct(draft){
- await flushWorkspace();
- const owner=signedUser,snapshot=structuredClone(state);
- const changes=[{scope:'products',key:draft.id,before:[],after:[draft]}];
- syncBusy=true;
- try{
-  const response=await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:serverRevision,changes})});
-  const data=await workspaceResponse(response);
-  if(signedUser!==owner||!serverReady)throw Error('登录已变化，请重新登录');
-  if(!response.ok)throw Error(data.error||'未能确认保存结果，请重试');
-  acceptWorkspace(data,snapshot);
-  syncLabel(syncPending?'有修改待保存':'已保存到数据库');
- }finally{
-  syncBusy=false;
-  if(syncPending&&signedUser===owner&&!syncConflict)setTimeout(pushState,450);
- }
-}
-async function pushState(){
- if(syncBusy||!serverReady||syncConflict||!syncPending)return;
- const owner=signedUser, revision=serverRevision, snapshot=structuredClone(state);
- syncBusy=true;syncPending=false;let failed=false;
- syncLabel('正在保存…');
- try{
-  const changes=savedWorkspaceRevision===revision?workspaceChanges(savedWorkspace,snapshot):null;
-  const body=JSON.stringify(changes?{revision,changes}:{revision,state:snapshot,returnState:true});
-  if(new Blob([body]).size>64*1024*1024)throw Error('本次修改超过 64 MB 保存上限，请下载备份并缩小修改范围');
-  const response=await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body});
-  const data=await workspaceResponse(response);
-  if(signedUser!==owner||!serverReady)return;
-  if(response.status===409){syncConflict=true;syncPending=true;syncLabel('保存冲突 · 请检查');showConflict(data.error,data.conflict);return;}
-  if(!response.ok)throw Error(data.error);
-  acceptWorkspace(data,snapshot);
-  syncLabel(syncPending?'有修改待保存':'已保存到数据库');
- }catch(error){
-  if(signedUser!==owner||!serverReady)return;
-  failed=true;syncPending=true;
-  syncLabel('保存失败 · 点击重试');
-  document.getElementById('serverStatus').onclick=pushState;
-  toast('保存失败，修改仍在当前页面。'+error.message);
- }finally{
-  syncBusy=false;
-  if(syncPending&&!syncConflict&&!failed&&signedUser===owner)setTimeout(pushState,450);
- }
-}
+async function pushState(){if(syncBusy||!serverReady||syncConflict||!syncPending)return;syncBusy=true;syncPending=false;let failed=false;syncLabel('正在保存…');try{const body=JSON.stringify({revision:serverRevision,state});if(new Blob([body]).size>64*1024*1024)throw Error('产品库超过 64 MB 保存上限，请先下载备份并联系管理员');const r=await fetch('/api/state',{method:'POST',headers:{'Content-Type':'application/json'},body});const data=await r.json();if(r.status===409){syncConflict=true;syncPending=true;syncLabel('保存冲突 · 请备份');toast(data.error);showConflict();return}if(!r.ok)throw Error(data.error);serverRevision=data.revision;syncLabel('已保存到数据库')}catch(e){failed=true;syncPending=true;syncLabel('保存失败 · 点击重试');document.getElementById('serverStatus').onclick=pushState;toast('服务端保存失败，修改保留在当前页面，请勿刷新：'+e.message)}finally{syncBusy=false;if(syncPending&&!syncConflict&&!failed)setTimeout(pushState,450)}}
 async function flushWorkspace(){
  if(!serverReady)throw Error('尚未连接工作空间，请连接后重试');
  const deadline=Date.now()+15000;
@@ -145,35 +37,8 @@ async function flushWorkspace(){
  if(syncPending)await pushState();
  if(syncConflict||syncPending||syncBusy)throw Error('修改尚未保存成功，请完成保存后重试');
 }
-let workspaceConflictMessage='',workspaceConflictRecord;
-function showConflict(message,record){
- if(message){workspaceConflictMessage=message;workspaceConflictRecord=record;}
- document.getElementById('workspaceConflict')?.remove();
- const notice=document.createElement('div');
- notice.id='workspaceConflict';notice.className='notice';notice.setAttribute('role','alert');
- notice.innerHTML='<p></p><div class="actions"><button class="btn primary" id="retryConflict">重新检查并保存</button><button class="btn" id="useServerRecord" hidden>采用冲突记录的服务器版本</button><button class="btn" id="backupConflict">下载本页备份</button><button class="btn" id="reloadConflict">读取服务器版本</button></div>';
- notice.querySelector('p').textContent=(workspaceConflictMessage||'这条记录已有更新')+'。本页修改仍保留。';
- document.querySelector('.content').prepend(notice);
- notice.querySelector('#retryConflict').onclick=async()=>{syncConflict=false;notice.remove();await pushState();};
- const useServer=notice.querySelector('#useServerRecord');
- useServer.hidden=!workspaceConflictRecord||savedWorkspaceRevision!==serverRevision;
- useServer.onclick=()=>{
-  if(!confirm('此操作会舍弃冲突记录的本页修改，其他待保存的修改会继续保存。确定继续？'))return;
-  const remaining=workspaceChanges(savedWorkspace,state).filter(change=>change.scope!==workspaceConflictRecord.scope||change.key!==workspaceConflictRecord.key);
-  state=keepEdits(structuredClone(savedWorkspace),remaining);
-  syncConflict=false;syncPending=true;
-  notice.remove();
-  void pushState().then(()=>render());
- };
- notice.querySelector('#backupConflict').onclick=()=>download('未保存修改.json',JSON.stringify(state,null,2));
- notice.querySelector('#reloadConflict').onclick=()=>{if(confirm('读取服务器版本将清除本页待保存的修改。确定继续？'))location.reload();};
-}
-
-render=function(){
- baseRender();
- enhance();
- if(syncConflict)showConflict();
-};
+function showConflict(){const d=document.createElement('div');d.className='notice';d.style.borderColor='#dca899';d.innerHTML='另一个页面已保存新版本。为避免覆盖，已暂停保存。 <button class="btn" id="backupConflict">下载当前修改备份</button> <button class="btn" id="reloadConflict">刷新读取最新版本</button>';document.querySelector('.content').prepend(d);document.getElementById('backupConflict').onclick=()=>download('冲突修改备份.json',JSON.stringify(state,null,2));document.getElementById('reloadConflict').onclick=()=>{if(confirm('确认已经备份本页修改？刷新会读取服务器的最新版本。'))location.reload()}}
+render=function(){if(view==='settings'){baseRender();document.getElementById('crumb').textContent='模型设置';document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view==='settings'));renderSettings()}else{baseRender();enhance()}if(syncConflict)showConflict()};
 function enhance(){if(view==='listing'){const box=document.querySelector('.grid .box');const p=product();const old=box.querySelectorAll('.fact');old[2].innerHTML='<span>已上传素材</span>'+((p.assets||[]).length)+' 张';old[3].innerHTML='<span>已记录资料</span>'+esc(p.material||'材质待填写')+' / '+esc(p.dimensions||'尺寸待填写');const btn=document.createElement('button');btn.className='btn';btn.textContent='编辑资料与变体';btn.onclick=editFacts;box.insertBefore(btn,document.getElementById('toimages'));if(document.getElementById('saveStatus'))document.getElementById('saveStatus').textContent='输入后自动保存';}if(view==='images')addAssets();}
 function supplierVariantFormValues(p){
  const c=p.supplierVariantCoverage||{};
@@ -236,7 +101,7 @@ function editFacts(){
 }
 function addAssets(){const p=product(),section=document.createElement('section');section.className='panel box';section.style.marginBottom='24px';section.innerHTML=`<h2>真实素材库 <span class="sub">${(p.assets||[]).length} 张</span></h2><p>上传 JPG、PNG、WebP，单张最多 15 MB。图片保存到本机服务端，按产品关联。</p><div class="actions" style="margin:15px 0"><select id="assetSource" aria-label="素材来源"><option>实拍图</option><option>供应商图</option></select><input id="assetColor" placeholder="对应颜色 / 规格" aria-label="素材颜色"><input id="assetInput" type="file" accept="image/jpeg,image/png,image/webp" multiple ${serverReady?'':'disabled'}></div><div id="assetGrid" style="display:flex;gap:14px;flex-wrap:wrap">${(p.assets||[]).map(a=>`<div style="width:150px"><img src="${esc(a.url)}" alt="${esc(a.name)}" style="width:150px;height:130px;object-fit:contain;background:#f4f5f0;border-radius:7px"><p class="sub" style="overflow-wrap:anywhere">${esc(a.name)}<br>${esc(a.source)} · ${esc(a.color||'未绑定颜色')}</p></div>`).join('')||'<p class="sub">尚未上传真实素材。下方是图片方案占位示意。</p>'}</div>`;document.querySelector('.gallery').before(section);document.getElementById('assetInput').onchange=async e=>{const files=[...e.target.files],source=document.getElementById('assetSource').value,color=document.getElementById('assetColor').value.trim();e.target.disabled=true;let done=0;for(const file of files){try{if(file.size>15*1024*1024)throw Error('超过 15 MB');const r=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});const result=await r.json();if(!r.ok)throw Error(result.error);p.assets||=[];p.assets.push({url:result.url,name:file.name,source,color});persist();done++}catch(error){toast(file.name+'：'+error.message)}}render();toast(`已上传 ${done} / ${files.length} 张图片`)}}
 window.addEventListener('beforeunload',e=>{if(syncBusy||syncPending){e.preventDefault();e.returnValue='还有修改未保存'}});
-async function initServer(){if(!/^https?:$/.test(location.protocol)){syncLabel('离线模式 · 浏览器保存');enhance();return}try{syncLabel('连接数据库…');const r=await fetch('/api/state');if(!r.ok)throw Error('服务不可用');const data=await r.json();serverRevision=data.revision;state=data.state||{products:[],copy:{},reviews:{}};savedWorkspace=structuredClone(state);savedWorkspaceRevision=serverRevision;if(!state.products.some(p=>p.id===selected))selected=state.products[0]?.id||'';serverReady=true;try{const settings=await fetch('/api/settings');if(settings.ok){const active=await settings.json();listingKeyConfigured=!!active.hasKey;listingTextProvider=active.provider||'文案服务'}}catch{}restoreWorkspaceRoute();render();syncLabel('已连接当前账号工作空间');return true}catch(e){console.error('Workspace initialization failed:',e);syncLabel('工作台加载失败');toast('工作台加载失败：'+e.message);return false}}
+async function initServer(){if(!/^https?:$/.test(location.protocol)){syncLabel('离线模式 · 浏览器保存');enhance();return}try{syncLabel('连接数据库…');const r=await fetch('/api/state');if(!r.ok)throw Error('服务不可用');const data=await r.json();serverRevision=data.revision;state=data.state||{products:[],copy:{},reviews:{}};if(!state.products.some(p=>p.id===selected))selected=state.products[0]?.id||'';serverReady=true;try{const settings=await fetch('/api/settings');if(settings.ok){const active=await settings.json();listingKeyConfigured=!!active.hasKey;listingTextProvider=active.provider||'文案服务'}}catch{}restoreWorkspaceRoute();render();syncLabel(typeof localWorkbenchMode!=='undefined'&&localWorkbenchMode?'已连接本机工作空间':'已连接当前账号工作空间');return true}catch(e){console.error('Workspace initialization failed:',e);syncLabel('工作台加载失败');toast('工作台加载失败：'+e.message);return false}}
 function deepSeekCredentialText(settings){
  if(!settings.hasKey)return '尚未配置密钥';
  const health=settings.credentialStatus||{};

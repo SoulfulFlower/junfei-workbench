@@ -6,7 +6,7 @@
 
 `automation/patch_junfei_source_window.py` 校验原始文件哈希和版本后备份并修改 service worker，另安装 `source-tab-window.mjs`。不会修改权限、账号或 Cookie。插件升级可能覆盖本修复，未知版本须重新审计，不直接套用。
 
-2026-11-06 已应用到 EGO 实际加载目录 `C:/Users/Administrator/Downloads/钧飞跨境-采集插件 V2.9.60` 及项目缓存副本，并重新加载该扩展。真实点击 B0HN4SH3MS 的“1688货源”后，新标签 p8 与来源 p4 的 windowId 一致，且属于专属 TaskSpace4。证据：`outputs/cyclic30-20261106/junfei-plugin-window-fix/live-click-result.json`。这是这条入口的验证，不代表所有第三方插件都已修复。
+2026-11-06 已应用到 EGO 实际加载目录 `C:/Users/ExampleUser00/Downloads/钧飞跨境-采集插件 V2.9.60` 及项目缓存副本，并重新加载该扩展。真实点击 B0HN4SH3MS 的“1688货源”后，新标签 p8 与来源 p4 的 windowId 一致，且属于专属 TaskSpace4。证据：`outputs/cyclic30-20261106/junfei-plugin-window-fix/live-click-result.json`。这是这条入口的验证，不代表所有第三方插件都已修复。
 
 验证命令：
 

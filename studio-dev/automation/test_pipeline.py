@@ -4,10 +4,6 @@ import json
 import sqlite3
 import tempfile
 import unittest
-import zipfile
-from io import StringIO
-from unittest.mock import patch
-from PIL import Image
 import hashlib
 from datetime import date, timedelta
 from pathlib import Path
@@ -15,6 +11,29 @@ from pipeline import Pipeline, CHECKS, STAGES, ROOT, doctor, read_json, readines
 
 
 class PipelineTests(unittest.TestCase):
+    def test_new_evidence_can_block_ready_without_claiming_or_reserving_images(self):
+        job=self.p.add('US','B000000091','us')
+        before=dict(self.p.get(job))
+        self.p.block_ready(job,'Supplier photograph contradicts actual variant texture')
+        after=dict(self.p.get(job))
+        self.assertEqual(after['status'],'blocked')
+        for key in ('stage','token','attempts','config'):
+            self.assertEqual(after[key],before[key])
+        self.assertEqual(self.p.db.execute('SELECT COUNT(*) FROM image_costs WHERE job_id=?',(job,)).fetchone()[0],0)
+        with self.assertRaises(ValueError):self.p.block_ready(job,'repeat')
+
+    def test_ready_block_cannot_change_running_or_unknown_tasks(self):
+        job=self.p.add('US','B000000091','us')
+        with self.assertRaises(ValueError):self.p.block_ready(job,' ')
+        token=self.p.claim(job)['token']
+        before=dict(self.p.get(job))
+        with self.assertRaises(ValueError):self.p.block_ready(job,'Do not bypass current claim')
+        self.assertEqual(dict(self.p.get(job)),before)
+        self.p.hold(job,token,'uncertain','External request result unknown')
+        before=dict(self.p.get(job))
+        with self.assertRaises(ValueError):self.p.block_ready(job,'Do not replace unknown result')
+        self.assertEqual(dict(self.p.get(job)),before)
+
     def test_thirty_day_window_is_snapshotted_and_rejects_day_31(self):
         self.cfg['selection']['window_days'] = 30
         job = self.p.add('US', 'B000000092', 'us')
@@ -68,7 +87,7 @@ class PipelineTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.cfg = read_json(ROOT / 'automation/config.example.json')
+        self.cfg = read_json(ROOT / 'automation/config.json')
         # Test fixtures must not depend on the operator's live paid-image switch.
         self.cfg['images']['enabled'] = False
         self.cfg['selection']['freshness_basis'] = 'seller_listing'
@@ -88,60 +107,6 @@ class PipelineTests(unittest.TestCase):
     def tearDown(self):
         self.p.db.close()
         self.temp.cleanup()
-
-    def listing_fixture(self, job):
-        row = self.p.get(job)
-        scope = {'source_id': row['source_id'], 'marketplace': row['market'], 'parent_sku': 'TEST-P',
-                 'variants': [{'sku': 'TEST-S', 'source_asin': 'B000000001', 'color': 'Black',
-                               'color_key': 'black', 'size': 'S'}]}
-        listing = {'sku': 'TEST-P', 'title': 'Fixture cotton storage tote with reinforced handles for travel',
-                   'bullets': ['First', 'Second', 'Third', 'Fourth', 'Fifth'],
-                   'description': 'Fixture product description.', 'terms': 'tote storage'}
-        return scope, listing
-
-    def make_listing(self, job):
-        scope, listing = self.listing_fixture(job)
-        output = Path(self.temp.name) / 'TEST-P-listing.json'
-        output.write_text(json.dumps(listing), encoding='utf-8')
-        return {'delivery_scope': scope, 'artifacts': [str(output)]}
-
-    def seed_listing(self, job):
-        scope, listing = self.listing_fixture(job)
-        self.p.event(job, 'listing', 'completed',
-                     {'delivery_scope': scope, 'finished_listing': {**{k: v for k, v in listing.items() if k != 'sku'}, 'highlights': ''}})
-
-    def make_images(self, job):
-        count = json.loads(self.p.get(job)['config'])['images'].get('gallery_count', 7)
-        image_slots = []
-        for slot in range(count):
-            path = Path(self.temp.name) / f'slot-{slot}.png'
-            Image.new('RGB', (1600, 1600), (slot, 0, 0)).save(path)
-            image_slots.append({'colorKey': 'black', 'slot': slot, 'file': str(path)})
-        return {'image_slots': image_slots, 'artifacts': [r['file'] for r in image_slots]}
-
-    def make_export(self, job, image_slots):
-        _, listing = self.listing_fixture(job)
-        archive_path = Path(self.temp.name) / 'delivery.zip'
-        manifest = []
-        with zipfile.ZipFile(archive_path, 'w') as archive:
-            archive.writestr('TEST-P/TEST-P-listing.json', json.dumps(listing))
-            for item in image_slots:
-                image = Path(item['file'])
-                name = 'TEST-P/' + image.name
-                raw = image.read_bytes()
-                archive.writestr(name, raw)
-                manifest.append({**item, 'kind': 'gallery', 'file': name, 'sha256': hashlib.sha256(raw).hexdigest()})
-            archive.writestr('TEST-P/image-manifest.json', json.dumps(
-                {'parentSku': 'TEST-P', 'childSkuCount': 1, 'reviewRequired': False, 'images': manifest}))
-            files = [r['file'] for r in manifest]
-            stream = StringIO()
-            writer = csv.writer(stream)
-            writer.writerow(['parent_sku', 'sku', 'source_asin', 'color', 'color_key', 'size', 'main_image',
-                             'generated_images', 'image_count'])
-            writer.writerow(['TEST-P', 'TEST-S', 'B000000001', 'Black', 'black', 'S',
-                             files[0], '|'.join(files), len(files)])
-            archive.writestr('TEST-P/variants.csv', stream.getvalue())
-        return {'artifacts': [str(archive_path)]}
 
     def evidence(self, job, stage):
         result = {'job_id': job, 'stage': stage, 'simulated': False, 'summary': 'test fixture only',
@@ -276,17 +241,11 @@ class PipelineTests(unittest.TestCase):
     def test_local_handoff_stops_at_export_even_after_resume(self):
         self.cfg['execution']['local_handoff_only'] = True
         job = self.p.add('US', 'B000000088', 'us')
-        for stage in STAGES[:3]:
-            self.p.finish(job, self.p.claim(job)['token'], self.evidence(job, stage))
-        self.p.finish(job, self.p.claim(job)['token'], dict(self.evidence(job, 'listing'), **self.make_listing(job)))
-        images = self.make_images(job)
-        self.p.finish(job, self.p.claim(job)['token'], dict(self.evidence(job, 'images'), **images))
+        self.p.db.execute('UPDATE jobs SET stage=? WHERE id=?', (STAGES.index('export'), job))
         claim = self.p.claim(job)
-        artifact = Path(self.temp.name) / 'fake-delivery.zip'
-        artifact.write_bytes(b'not a ZIP')
-        with self.assertRaises(ValueError):
-            self.p.finish(job, claim['token'], dict(self.evidence(job, 'export'), artifacts=[str(artifact)]))
-        evidence = dict(self.evidence(job, 'export'), **self.make_export(job, images['image_slots']))
+        artifact = Path(self.temp.name) / 'delivery.zip'
+        artifact.write_bytes(b'local handoff fixture')
+        evidence = dict(self.evidence(job, 'export'), artifacts=[str(artifact)])
         self.p.finish(job, claim['token'], evidence)
         row = self.p.get(job)
         self.assertEqual((row['stage'], row['status']), (STAGES.index('publish'), 'blocked'))
@@ -347,12 +306,10 @@ class PipelineTests(unittest.TestCase):
 
     def test_retry_limit_does_not_reset_on_resume(self):
         job = self.p.add('US', 'B000000006', 'us')
-        token = self.p.claim(job)['token']
-        with self.assertRaises(ValueError): self.p.resume(job, 'still running', token)
-        self.p.hold(job, token, 'blocked', 'missing')
-        self.p.resume(job, 'verified local state', token)
+        token = self.p.claim(job)['token']; self.p.hold(job, token, 'blocked', 'missing')
+        self.p.resume(job, 'verified no submission')
         token = self.p.claim(job)['token']; self.p.hold(job, token, 'blocked', 'missing again')
-        with self.assertRaisesRegex(ValueError, '上限'): self.p.resume(job, 'no submission', token)
+        with self.assertRaises(ValueError): self.p.resume(job, 'no submission')
 
     def test_missing_artifacts_cannot_advance(self):
         job = self.p.add('US', 'B000000003', 'us')
@@ -362,8 +319,6 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.p.finish(job, token, e)
         artifact = Path(self.temp.name) / 'listing.txt'; artifact.write_text('test listing')
         e['artifacts'] = [str(artifact)]
-        with self.assertRaises(ValueError): self.p.finish(job, token, e)
-        e.update(self.make_listing(job))
         self.p.finish(job, token, e)
         image = self.p.claim(job)
         self.assertEqual(image['stage'], 'images')  # image generation is disabled; use supplied assets
@@ -379,7 +334,8 @@ class PipelineTests(unittest.TestCase):
             token = self.p.claim(job)['token']
             e = self.evidence(job, stage)
             if stage == 'listing':
-                e.update(self.make_listing(job))
+                artifact = Path(self.temp.name) / 'listing.txt'; artifact.write_text('test listing')
+                e['artifacts'] = [str(artifact)]
             self.p.finish(job, token, e)
         with self.assertRaises(ValueError): self.p.claim(job)
 
@@ -398,8 +354,8 @@ class PipelineTests(unittest.TestCase):
             self.p.reserve_image_cost(first, '2.00')
         settled = self.p.settle_image_cost(reservation['reservation_id'], '3.50', 'Provider invoice confirmed', 'image-task-1')
         self.assertEqual(settled['state'], 'settled')
-        self.seed_listing(first)
-        evidence = dict(self.evidence(first, 'images'), **self.make_images(first))
+        artifact = Path(self.temp.name) / 'image.jpg'; artifact.write_bytes(b'fixture image')
+        evidence = self.evidence(first, 'images'); evidence['artifacts'] = [str(artifact)]
         self.p.finish(first, token, evidence)
         self.p.db.execute("UPDATE jobs SET stage=4,status='ready',token=NULL WHERE id=?", (first,))
         with self.assertRaisesRegex(ValueError, '本产品生图预算不足'):
@@ -431,37 +387,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.p.image_budget_status()['daily_used_and_reserved_rmb'], '5.25')
 
     def test_publish_and_online_are_distinct(self):
-        from pipeline import now
-        job = self.p.add('US', 'B000000001', 'us')
-        scope, _ = self.listing_fixture(job)
-        self.p.event(job, 'export', 'completed', {'delivery_scope': scope})
+        job = self.p.add('US', 'A', 'us')
         self.p.db.execute("UPDATE jobs SET stage=6,status='running',token='t' WHERE id=?", (job,))
-        self.p.hold(job, 't', 'uncertain', 'lost publish response')
-        with self.assertRaises(ValueError): self.p.resume(job, 'caller says no submission', 't')
-        self.assertEqual(self.p.get(job)['token'], 't')
         e = self.evidence(job, 'publish')
         with self.assertRaises(ValueError): self.p.finish(job, 't', e)
-        e['external_ids'] = ['123456']
-        e['publication'] = {'store': 'test-us', 'marketplace': 'US', 'publish_id': '123456', 'child_skus': ['TEST-S']}
-        e['workbench_publication_id'] = 'workbench-fixture'
+        e['external_ids'] = ['test-sku']
         self.p.finish(job, 't', e)
         self.assertEqual(self.p.status()[0]['stage'], 'verify')
-        token = self.p.claim(job)['token']
-        verify = dict(self.evidence(job, 'verify'), external_ids=e['external_ids'],
-                      online_observation={'source': 'caller-supplied evidence'})
-        child = {'sku': 'TEST-S', 'asin': 'B000000001', 'status': 'online'}
-        receipt = {'store': 'test-us', 'marketplace': 'US', 'publish_id': '123456', 'parent_sku': 'TEST-P',
-                   'workbench_publication_id': 'workbench-fixture',
-                   'observed_at': now(), 'children': [child]}
-        for invalid in (None, {**receipt, 'observed_at': '2000-01-01T00:00:00Z'},
-                        {**receipt, 'children': [{**child, 'sku': 'wrong'}]}):
-            with patch('pipeline.workbench_call', return_value=invalid), self.assertRaises(ValueError):
-                self.p.finish(job, token, verify)
-        with patch('pipeline.workbench_call', return_value=receipt) as read:
-            self.p.finish(job, token, verify)
-            self.assertIn('publishId=123456', read.call_args.args[0])
-        self.assertEqual(self.p.get(job)['status'], 'done')
-
+        self.assertEqual(self.p.get(job)['status'], 'ready')
 
     def test_doctor_catches_uncalibrated_publisher(self):
         self.assertTrue(any('未完成' in item for item in doctor(self.cfg)))

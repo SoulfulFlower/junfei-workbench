@@ -296,9 +296,7 @@ class StudioTests(unittest.TestCase):
         self.assertEqual(self.call('/api/state')[1]['revision'], revision)
 
     def test_reject_invalid_product(self):
-        _, current = self.call('/api/state')
-        self.assertEqual(self.call('/api/state', {'revision': current['revision'],
-            'state': {'products': [{}], 'copy': {}, 'reviews': {}}})[0], 400)
+        self.assertEqual(self.call('/api/state', {'revision': 0, 'state': {'products': [{}], 'copy': {}, 'reviews': {}}})[0], 400)
 
     def test_cross_origin_write_rejected(self):
         self.assertEqual(self.call('/api/settings', {}, 'https://example.com')[0], 403)
@@ -310,9 +308,9 @@ class StudioTests(unittest.TestCase):
         self.assertNotIn('fake-test-key', json.dumps(self.call('/api/settings')))
         self.call('/api/settings', {'model': 'test-model', 'clearKey': True})
 
-    def test_legacy_generation_requires_durable_entry(self):
+    def test_missing_configuration_blocks_generation(self):
         status, _ = self.call('/api/generate/listing', {'product': {'name': 't'}, 'market': 'US'})
-        self.assertEqual(status, 410)
+        self.assertEqual(status, 400)
 
     def test_upload_validation_and_static_boundary(self):
         req = urllib.request.Request(self.base + '/api/upload', data=b'<html>not image</html>', method='POST', headers={'Cookie':'studio_session='+self.token})

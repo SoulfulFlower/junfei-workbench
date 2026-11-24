@@ -24,7 +24,7 @@ def _white_padding(image):
     return False
 
 
-def inspect(raw, *, expected=None, minimum=1600, main=False, full_bleed=False):
+def inspect(raw, *, expected=None, minimum=1600, main=False, full_bleed=False, size_chart=False):
     result = {'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw), 'issues': []}
     issues = result['issues']
     try:
@@ -59,6 +59,11 @@ def inspect(raw, *, expected=None, minimum=1600, main=False, full_bleed=False):
             if full_bleed and _white_padding(rgb):
                 issues.append({'code': 'WHITE_PADDING', 'severity': 'error',
                                'message': '成图含明显的上下或左右白边。让实景或版式背景连续铺满画布四边，保持图位原定的镜头、比例和安全边距。'})
+            if main or full_bleed:
+                import image_composition
+                composition = image_composition.inspect(raw, role='size_chart' if size_chart else 'main' if main else 'supporting')
+                result['composition'] = composition
+                issues.extend(composition['issues'])
     except (OSError, ValueError, Image.DecompressionBombError):
         issues.append({'code': 'BAD_FILE', 'severity': 'error', 'message': '成图无法按单帧 PNG/JPG/WebP 解码'})
     result['pass'] = not any(issue['severity'] == 'error' for issue in issues)

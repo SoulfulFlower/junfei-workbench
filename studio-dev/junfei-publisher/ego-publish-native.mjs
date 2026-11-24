@@ -41,6 +41,14 @@ export function normalizePublication(data,input){
 }
 
 const materialAdvisoryText='您提交的内容缺少一些关键属性：material。 缺少这些属性不会阻止您的商品在亚马逊上展示。 然而，这会影响您的商品信息的整体质量。';
+const usApparelAdvisoryText='您提交的内容缺少一些关键属性：material, pattern, special_feature。 缺少这些属性不会阻止您的商品在亚马逊上展示。 然而，这会影响您的商品信息的整体质量。';
+export function isUsApparelAdvisory(value,sku){
+ return Boolean(sku)&&value?.code==='18448'&&value.severity==='WARNING'&&value.message===usApparelAdvisoryText&&
+  JSON.stringify(value.attributeNames)===JSON.stringify(['material','pattern','special_feature'])&&
+  Array.isArray(value.categories)&&value.categories.length===2&&value.categories.includes('MISSING_ATTRIBUTE')&&value.categories.includes('PRODUCT')&&
+  !('enforcements' in value)&&(value.sku===undefined||value.sku===sku)&&(value.solution===undefined||value.solution==='')&&
+  Object.keys(value).every(key=>['code','message','severity','attributeNames','categories','sku','solution','childId','sources'].includes(key));
+}
 function isMaterialAdvisory(value,data,child){
  // Match the observed UK notice and its metadata. Unknown notice shapes
  // continue through the normal failure checks.
@@ -68,10 +76,11 @@ function publicationMessages(data){
   const sku=row?.sku||value.sku||null,child=row||data.items.find(item=>item.sku===sku);
   const message={sku,childId:child?String(child.id):null,code:value.code==null?null:String(value.code),
    message:typeof value.message==='string'?value.message:String(value.message??''),severity:value.severity??null};
-  for(const key of ['categories','enforcements','solution'])if(value[key]!==undefined)message[key]=structuredClone(value[key]);
+  for(const key of ['categories','enforcements','solution','attributeNames'])if(value[key]!==undefined)message[key]=structuredClone(value[key]);
   const key=JSON.stringify([message.sku,message.code,message.message,message.severity]),previous=seen.get(key);
-  const advisory=isMaterialAdvisory(value,data,child);
+  const advisory=isMaterialAdvisory(value,data,child)||(data.country_code==='US'&&Boolean(child)&&isUsApparelAdvisory(value,child.sku));
   if(previous){
+   if(message.code==='18448'&&(!advisory||!advisories.has(previous)))previous.advisoryMetadataUnverified=true;
    if(!advisory)advisories.delete(previous);
    if(!previous.sources.includes(source))previous.sources.push(source);
    for(const [field,v]of Object.entries(message))if(previous[field]===undefined)previous[field]=v;
@@ -84,7 +93,7 @@ function publicationMessages(data){
  add(data.errors,'data.errors');
  for(const row of data.items){add(row.errors,'child.errors',row);add(row.extra?.message,'child.extra.message',row);}
  return{messages,blockingMessages:messages.filter(message=>!advisories.has(message)),
-  warnings:[...advisories].map(message=>({...message,attributeNames:['material']}))};
+  warnings:[...advisories].map(message=>({...message,attributeNames:message.attributeNames??['material']}))};
 }
 
 function makePublicationFailureObservation(data,input,checks,messages,blockingMessages,terminalFailures){
@@ -142,10 +151,7 @@ export function verifyPublication(response,input,publishId,{allowOnline=false}={
  }
  return{publishId:String(d.id),status:d.status,accountId:input.accountId,erpAccountId:String(d.uid),productId:input.productId,
   destinationId:input.destination.destinationId,draftId:String(input.destination.draftId),marketId:String(d.market_id),countryCode:d.country_code,
-  store:d.market.alias,parentSku:d.sku,children:checks.map(v=>{
-   const child=d.items.find(row=>row.sku===v.sku);
-   return{sku:v.sku,color:v.color,size:v.size,images:v.images,status:child.status,asin:child.asin??null};
-  }),
+  store:d.market.alias,parentSku:d.sku,children:checks.map(v=>({sku:v.sku,color:v.color,size:v.size,images:v.images})),
   allChildrenOnline,imagePersistenceVerified:checks.every(v=>v.imagesSource==='child_gallery'),errors:[],...(warnings.length?{warnings}:{})};
 }
 

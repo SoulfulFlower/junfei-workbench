@@ -105,6 +105,8 @@ def dispatch_supplier_once():
         with accounts.connect() as c:
             users=[dict(row) for row in c.execute('SELECT id,role,status FROM users')]
         owner=next((u['id'] for u in sorted(users,key=lambda u:u['id']) if u['role']=='admin'),None)
+        if os.environ.get('JUNFEI_LOCAL_MODE') == '1':
+            users=[user for user in users if user['id']==owner]
         scopes={supplier_capture.scope_for_data(app_paths.DATA if u['id']==owner else WORKSPACE_ROOT/str(u['id'])):u for u in users}
         scope=supplier_capture.dispatch_scope(scopes)
         if scope is None:

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "executionStatus": "not_implemented",
+  "strategy": "round_robin_store_batches",
+  "productsPerStoreTurn": 3,
+  "productAssignment": "new_products_only",
+  "countUnit": "distinct_product",
+  "completionGate": "all_configured_markets_verified_publishing",
+  "repeat": true,
+  "onUnresolvedProduct": "hold_current_product_and_store",
+  "targets": []
+}

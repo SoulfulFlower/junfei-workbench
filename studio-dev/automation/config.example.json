@@ -18,7 +18,8 @@
       "1688"
     ],
     "require_exact_variant_match": true,
-    "missing_information_policy": "leave_empty_no_fabrication"
+    "missing_information_policy": "leave_empty_no_fabrication",
+    "supplier_capture_min_interval_seconds": 90
   },
   "pricing": {
     "currency": "USD",

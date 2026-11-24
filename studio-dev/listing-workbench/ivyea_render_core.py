@@ -443,6 +443,35 @@ def _compile_render_prompt(image: dict, plan_style: dict, product_profile: dict,
 
     先写商品真值，再写版式参考用途和自定义描述。旧的生成区块按当前字段重编译。
     """
+    if image.get('official_template'):
+        from official_image_templates import raw_prompt_section
+        official=image['official_template']
+        identity=_compile_presence_section(image,product_profile,str(plan.get('product_lock') or ''))
+        current={k:image.get(k) for k in ('role','buyer_question','evidence','scene','camera_direction','scene_direction') if image.get(k)}
+        scene=image.get('scene_direction') or {}
+        camera='; '.join(label+' '+str(scene[key]) for key,label in
+            (('angle','camera'),('pose','pose'),('framing','framing'),('composition','composition')) if scene.get(key))
+        apparel_lock=('\n[APPAREL IDENTITY AND COLOUR] Neutral D65 product colour overrides warm template grades. '
+            'Preserve source-visible individual fringe strands, irregular gaps, length and attachment seams; '
+            'never replace them with uniform teeth, a merged curtain or invented rows. Model/scene identity references '
+            'apply only to designated consistent-model shots; ordinary lifestyle images do not silently inherit them. '
+            'Preserve the complete original user request and distinguish verified facts from AI inference. '
+            'Render only the current image, keeping real details large and product prominent.[/APPAREL IDENTITY AND COLOUR]\n'
+            if image.get('apparelOrchestration') or plan.get('apparelOrchestration') else '')
+        return (
+            '[PRODUCT PRESENCE]'+identity+'[/PRODUCT PRESENCE]\n'
+            '[REFERENCE ROLES]Reference image 2 is the REAL original template artwork whose complete original prompt follows. '
+            'It is not a schematic. Use its original composition, photo hierarchy and type design; adapt the subject and authorised copy '
+            'to the current source product. Never borrow its brand, product, hidden construction or unsupported factual claims.[/REFERENCE ROLES]\n'
+            +raw_prompt_section(official)
+            +'\n[SHOT DESIGN]'+camera+'; '+json.dumps(current,ensure_ascii=False)+'[/SHOT DESIGN]\n'
+            +'[CANVAS]One finished '+str(image.get('size') or ('1464x600' if deliverable=='aplus' else '1600x1600'))+
+            ' artwork. Keep the actual product proportions and required hems. Use neutral daylight and exact source colour; no amber/orange grade.[/CANVAS]\n'
+            +'[FINAL ARTWORK COPY]'+_compile_copy_section(image,plan_style)+'[/FINAL ARTWORK COPY]\n'
+            +'[OUTPUT SAFETY]Only current verified copy and actual product markings are permitted. '
+            'No borrowed template claims, invented facts, additional badges or watermark.[/OUTPUT SAFETY]'
+            +apparel_lock
+        )
     existing = str(image.get("render_prompt") or "")
     base = existing
     for name in ("SHOT DESIGN", "CANVAS", "PRODUCT IDENTITY LOCK", "PRODUCT PRESENCE", "REFERENCE ROLES", "SET COLOR SYSTEM",
@@ -465,7 +494,8 @@ def _compile_render_prompt(image: dict, plan_style: dict, product_profile: dict,
     if image.get("template_url"):
         prompt = _replace_prompt_section(
             prompt, "REFERENCE ROLES",
-            "REFERENCE IMAGE 2 is a layout template only. Use its framing, subject scale, negative space and "
+            "REFERENCE IMAGE 2 is a layout template only. Abstract coloured rectangles are subject/type zones, "
+            "never physical objects, borders or decorations to reproduce. Use its framing, subject scale, negative space and "
             "information hierarchy. Do not reproduce its product, brand, text, person, or exact pixels.",
         )
     if deliverable == "gallery" and image.get("shot_type") != "white_main":
@@ -505,10 +535,13 @@ def _compile_render_prompt(image: dict, plan_style: dict, product_profile: dict,
         "watermarks. The exact public copy in FINAL ARTWORK COPY is the only added text allowed. Product labels "
         "already visible on the reference product are part of the product and must remain unchanged.",
     )
+    if image.get('official_template'):
+        from official_image_templates import raw_prompt_section
+        prompt += raw_prompt_section(image['official_template'])
     return prompt
 
 
-def planning_prompt(*, deliverable, count_rule, product_context, approved, product_profile_text, img_sp, template_text, narrative_text, deliverable_rules, body, color_directive):
+def legacy_planning_prompt(*, deliverable, count_rule, product_context, approved, product_profile_text, img_sp, template_text, narrative_text, deliverable_rules, body, color_directive):
     return f"""You are a senior ecommerce creative director planning a commercially usable Amazon {deliverable} set. {count_rule}
 
 Study how flagship 3C brands (DJI / Anker level) build galleries: only 1-2 images show the product as the dominant
@@ -559,3 +592,26 @@ the rendering pipeline compiles final image prompts from these fields.
     "headline":"...","subline":"...","big_number":"...","proof":"",
     "scene":"...","visual_concept":"...","camera_direction":"...","text_zone":"top-center","layout_style":"editorial"}}
  ]}}"""
+
+
+def planning_prompt(**kwargs):
+    """Independent product-led director; upstream prompt retained above."""
+    text=legacy_planning_prompt(**kwargs)
+    start=text.index('Study how flagship 3C brands')
+    end=text.index('## PRODUCT INFO')
+    text=text[:start]+"""Build a photographic ecommerce set around this exact product and buyer questions.
+The real product, visible construction and relevant use lead each composition.
+Vary actual camera framing, setting and buyer information, not just backgrounds or headlines.
+Keep the item prominent; scenes are tightly framed and details are continuous full-bleed photos.
+Never fill a slot with a tiny product below giant words, an invented number or a decorative card.
+Use a shared light direction, palette and restrained type, adapted to the product category.
+Selected layout references constrain composition only; their product/text/claims are not truth.
+
+"""+text[end:]
+    start=text.index('- product_presence:')
+    end=text.index('- layout:',start)
+    text=text[:start]+"""- product_presence: hero (prominent product) | supporting (product with useful context) |
+  environmental (a tightly framed real use scene) | absent (only a complete verified information table).
+  There is no quota limiting hero images, and no compulsory product-free or distant scene.
+  Every image must provide distinct visible value. """+str(kwargs['deliverable_rules'])+'\n'+text[end:]
+    return text

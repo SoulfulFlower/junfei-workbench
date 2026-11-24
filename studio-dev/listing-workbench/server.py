@@ -7,7 +7,7 @@ import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 import provider
 import image_provider
 import importer
@@ -39,6 +39,7 @@ import ssl
 import os
 import ipaddress
 import hmac
+import re
 import account_spaces
 import agent_center
 import agent_intake
@@ -46,8 +47,6 @@ import agent_sourcing
 import amazon_selection_capture
 import discovery_intake
 import product_progress
-import workspace_state
-import codex_operations
 
 ROOT = Path(__file__).resolve().parent
 DATA = app_paths.DATA
@@ -56,6 +55,14 @@ DATA.mkdir(exist_ok=True)
 DB = DATA / 'studio.sqlite3'
 LOCK = threading.Lock()
 STATE_BODY_LIMIT = 64 * 1024 * 1024
+CAPTURE_PATHS = {'/api/import/browser', '/api/selection/capture', '/api/selection/capture-seller-store'}
+EXTENSION_SESSION_PATHS = {'/api/auth/extension-status', '/api/auth/extension-logout'}
+ACCOUNT_ACTIONS = {'/api/auth/setup', '/api/auth/register', '/api/auth/login',
+                   '/api/auth/logout', '/api/auth/users', '/api/auth/extension-login'}
+
+
+def local_mode():
+    return not app_paths.WORKER_USER and os.environ.get('JUNFEI_LOCAL_MODE') == '1'
 
 
 @contextmanager
@@ -74,65 +81,6 @@ with database() as conn:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def codex_identity(self, path):
-        auth = self.headers.get('Authorization', '')
-        if path not in ('/api/codex/status', '/api/codex/next', '/api/codex/review', '/api/codex/receipt',
-                        '/api/codex/publication-receipt') or not auth.startswith('Bearer '):
-            return None, None
-        result = accounts.identify_codex(auth[7:])
-        return result if result else (None, None)
-
-    def codex_route(self, path, user, scope, data=None):
-        owner = user['id']
-        payload = data if data is not None else {}
-        if scope:
-            product, market = scope
-        elif data is None:
-            query = parse_qs(urlsplit(self.path).query)
-            product, market = (query.get(key, [''])[0] for key in ('productId', 'market'))
-        else:
-            product, market = payload.get('productId'), payload.get('market')
-        if path == '/api/codex/pair' and data is not None and scope is None:
-            _, workspace = codex_operations.read_workspace(database)
-            codex_operations.validate_scope(workspace, product, market)
-            token = accounts.issue_codex(owner, product, market, codex_operations.TTL)
-            return self.reply(201, {'token': token, 'expiresIn': codex_operations.TTL})
-        if path == '/api/codex/status' and data is None:
-            status = codex_operations.status(owner, database, product, market)
-            status['proposals'] = codex_operations.list_proposals(owner, product, market)
-            return self.reply(200, status)
-        if path == '/api/codex/assign' and data is not None and scope is None:
-            return self.reply(200, codex_operations.assign(owner, database, product, market, data.get('action')))
-        if path == '/api/codex/next' and data is None and scope:
-            return self.reply(200, codex_operations.next_assignment(owner, product, market))
-        if path == '/api/codex/publication-receipt' and data is None and scope:
-            query = parse_qs(urlsplit(self.path).query)
-            if set(query) != {'jobId', 'publishId', 'sourceId', 'pipelineJobId'} or any(len(v) != 1 for v in query.values()):
-                raise ValueError('请提供原工作台、ERP 和 CLI 任务身份')
-            job_id, publish_id, source_id, pipeline_id = (query[k][0] for k in ('jobId', 'publishId', 'sourceId', 'pipelineJobId'))
-            _, workspace = codex_operations.read_workspace(database)
-            item = codex_operations.validate_scope(workspace, product, market)
-            reference = (item.get('selectionResearch') or {}).get('reference') or {}
-            links = discovery_intake.links(app_paths.DATA / 'studio.sqlite3', owner, product)
-            if (reference.get('asin') != source_id and not any(link['asin'] == source_id for link in links)
-                    or links and not any(link['asin'] == source_id and link['job_id'] == pipeline_id
-                                        and link['market'] == market for link in links)):
-                raise ValueError('CLI 任务不属于该配对商品和站点')
-            return self.reply(200, publication_flow.online_receipt(owner, product, market, job_id, publish_id))
-        if path == '/api/codex/review' and data is not None and scope:
-            return self.reply(200, codex_operations.submit_review(owner, database, product, market, data))
-        if path == '/api/codex/receipt' and data is None:
-            request_id = parse_qs(urlsplit(self.path).query).get('requestId', [''])[0]
-            return self.reply(200, codex_operations.receipt(owner, product, market, request_id))
-        if path == '/api/codex/resolve-unsubmitted' and data is not None and scope is None:
-            return self.reply(200, codex_operations.resolve_submission(owner, product, market,
-                              payload.get('requestId'), payload.get('reference')))
-        if path == '/api/codex/decline' and data is not None and scope is None:
-            return self.reply(200, codex_operations.decline(owner, product, market, payload.get('requestId')))
-        if path == '/api/codex/approve' and data is not None and scope is None:
-            return self.reply(200, codex_operations.approve(owner, database, product, market, payload.get('requestId')))
-        return self.reply(404, {'error': '操作入口不存在'})
-
     def secure_request(self):
         return isinstance(self.connection, ssl.SSLSocket) or (
             os.environ.get('JUNFEI_TRUST_PROXY') == '1'
@@ -141,6 +89,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def origin(self):
         return ('https://' if self.secure_request() else 'http://') + self.headers.get('Host', '')
+
+    def local_request_allowed(self, path):
+        host = self.headers.get('Host', '').lower()
+        port = self.server.server_port
+        if (not ipaddress.ip_address(self.client_address[0]).is_loopback
+                or os.environ.get('JUNFEI_TRUST_PROXY') == '1'
+                or host not in {f'127.0.0.1:{port}', f'localhost:{port}'}
+                or any(name in self.headers for name in ('Forwarded', 'X-Forwarded-For', 'X-Forwarded-Host',
+                                                          'X-Forwarded-Proto'))):
+            return False
+        origin = self.headers.get('Origin', '')
+        if self.command == 'POST' and path in CAPTURE_PATHS | EXTENSION_SESSION_PATHS:
+            if re.fullmatch(r'chrome-extension://[a-p]{32}', origin):
+                return True  # These routes still require the workbench capture token.
+        if origin and origin != self.origin():
+            return False
+        site = self.headers.get('Sec-Fetch-Site')
+        if site in (None, 'none', 'same-origin'):
+            return True
+        return (self.command == 'GET' and path in ('/', '/index.html')
+                and self.headers.get('Sec-Fetch-Mode') == 'navigate'
+                and self.headers.get('Sec-Fetch-Dest') == 'document')
 
     def reply(self, status, data, mime='application/json; charset=utf-8', cookie=None, download_name=None):
         payload = json.dumps(data, ensure_ascii=False).encode() if isinstance(data, dict) else data
@@ -160,6 +130,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if app_paths.WORKER_USER and not hmac.compare_digest(self.headers.get('X-Junfei-Internal',''),app_paths.INTERNAL_TOKEN):return self.reply(403,{'error':'Private runtime'})
         path = urlsplit(self.path).path
+        local = local_mode()
+        if local and not self.local_request_allowed(path):
+            return self.reply(403, {'error': '单机工作台只接受本机请求'})
+        if local and path in ACCOUNT_ACTIONS:
+            return self.reply(404, {'error': '单机工作台直接打开使用'})
         if path == '/api/desktop-health':
             return self.reply(200, {'app': 'amazon-listing-workbench'})
         # Static shell must load before account initialization; this also keeps the desktop bundle usable on first run.
@@ -171,9 +146,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ('/', '/index.html', '/library', '/products', '/quality', '/settings', '/help', '/tasks', '/skills'):
             return self.reply(200, (ROOT / 'index.html').read_bytes(), 'text/html; charset=utf-8')
-        user, codex_scope = (self.codex_identity(path) if self.headers.get('Authorization') and path.startswith('/api/codex/')
-                             else (accounts.identify(accounts.session_token(self.headers)), None))
+        user = accounts.local_workspace() if local else accounts.identify(accounts.session_token(self.headers))
         if path == '/api/auth/status':
+            if local:
+                return self.reply(200, {'setup': False, 'user': user, 'localMode': True})
             return self.reply(200, {'setup': accounts.setup_needed(), 'user': user, 'localSetupOnly': not ipaddress.ip_address(self.client_address[0]).is_loopback})
         if (path.startswith('/api/') or path.startswith('/uploads/')) and not user:
             return self.reply(401, {'error': '请先登录'})
@@ -182,11 +158,46 @@ class Handler(BaseHTTPRequestHandler):
         if account_spaces.needs_proxy(user,path):
             try:return account_spaces.proxy(self,user)
             except Exception:return self.reply(503,{'error':'独立工作空间暂时不可用，请重试'})
-        if path.startswith('/api/codex/'):
+        if path.startswith('/api/image-templates/'):
+            from urllib.parse import parse_qs
+            import official_image_templates as library
+            query=parse_qs(urlsplit(self.path).query)
+            kind=query.get('kind',['layout'])[0]
             try:
-                return self.codex_route(path, user, codex_scope)
-            except (ValueError, KeyError, TypeError) as error:
-                return self.reply(400, {'error': str(error)})
+                if path=='/api/image-templates/catalog':return self.reply(200,library.catalog(kind))
+                if path=='/api/image-templates/item':return self.reply(200,library.get(query.get('id',[''])[0],kind))
+                if path=='/api/image-templates/image':
+                    raw,mime=library.image(query.get('id',[''])[0],kind,query.get('preview')==['1'])
+                    return self.reply(200,raw,mime)
+                if path=='/api/image-templates/colour':return self.reply(200,library.colour_resources())
+            except (ValueError,OSError) as error:return self.reply(400,{'error':str(error)})
+            return self.reply(404,{'error':'Unknown official template endpoint'})
+        if path=='/api/image-tools/task':
+            from urllib.parse import parse_qs
+            import image_tools
+            try:return self.reply(200,{'task':image_tools.poll(parse_qs(urlsplit(self.path).query).get('id',[''])[0])})
+            except ValueError as error:return self.reply(400,{'error':str(error)})
+        if path.startswith('/api/image-engine/'):
+            from urllib.parse import parse_qs
+            import image_engine
+            query=parse_qs(urlsplit(self.path).query)
+            try:
+                if path=='/api/image-engine/variants':
+                    import image_source_variants
+                    with database() as conn:
+                        row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                    product=next((p for p in (json.loads(row[0]) if row else {}).get('products',[]) if p['id']==query.get('productId',[''])[0]),None)
+                    if not product:raise ValueError('当前账号没有该商品')
+                    return self.reply(200,image_source_variants.catalog(product))
+                if path=='/api/image-engine/sources':
+                    import image_workflow_sources
+                    return self.reply(200,{'sources':image_workflow_sources.list_sources(query.get('productId',[''])[0])})
+                if path=='/api/image-engine/tasks':
+                    return self.reply(200,{'tasks':image_engine.list_tasks(query.get('productId',[''])[0])})
+                if path=='/api/image-engine/task':
+                    return self.reply(200,{'task':image_engine.poll(query.get('id',[''])[0])})
+            except ValueError as error:return self.reply(400,{'error':str(error)})
+            return self.reply(404,{'error':'Unknown image engine endpoint'})
         if path.startswith('/api/erp-collection/'):
             import erp_collection
             from urllib.parse import parse_qs
@@ -264,6 +275,9 @@ class Handler(BaseHTTPRequestHandler):
             from urllib.parse import parse_qs
             query = parse_qs(urlsplit(self.path).query)
             try:
+                if path == '/api/agent/rotation-setup':
+                    import store_rotation_setup
+                    return self.reply(200, store_rotation_setup.read(user['id'], query.get('setupId', [None])[0]))
                 if path == '/api/agent/overview': return self.reply(200, agent_center.overview(user['id']))
                 tid = query.get('id', [''])[0]
                 if path == '/api/agent/task':
@@ -433,10 +447,6 @@ class Handler(BaseHTTPRequestHandler):
                                                    ('_isScene','sourceIssue','sourceObservation','product_source_url')}
                                                   for card in preview['images']]
             return self.reply(200,result)
-        if path == '/api/state' and urlsplit(self.path).query == 'readOnly=1':
-            with database() as conn:
-                row = conn.execute('SELECT revision, body FROM workspace WHERE id=1').fetchone()
-            return self.reply(200, {'revision': row[0] if row else 0, 'state': json.loads(row[1]) if row else None})
         if path == '/api/state':
             with LOCK, database() as conn:
                 conn.execute('BEGIN IMMEDIATE')
@@ -460,10 +470,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, (ROOT / 'ui-polish.css').read_bytes(), 'text/css; charset=utf-8')
         if path == '/workbench-design.css':
             return self.reply(200, (ROOT / 'workbench-design.css').read_bytes(), 'text/css; charset=utf-8')
-        if path in ('/workbench-home.js', '/workbench-skills.js', '/product-library.js', '/supplier-capture.js', '/listing-jobs.js', '/publication-tasks.js', '/publication-confirmation.js',
+        if path in ('/workbench-home.js', '/workbench-skills.js', '/product-library.js', '/supplier-capture.js', '/listing-jobs.js', '/publication-tasks.js',
                     '/colour-api.js', '/colour-view-rules.js', '/colour-page.js', '/colour-pixel-tools.js'):
             return self.reply(200, (ROOT / path[1:]).read_bytes(), 'text/javascript; charset=utf-8')
-        if path in ('/', '/index.html', '/openai-images.js', '/generated-gallery.js', '/product-editor.js', '/agent-center.js', '/discovery-ui.js', '/discovery-browser-ui.js', '/selection.js', '/auth.js', '/studio-migration.js', '/colour-sets.js', '/assistant-chat.js', '/visual-studio.js', '/enhancements.js', '/images.js', '/workflow.js', '/import.js', '/competitors.js', '/sellersprite.js'):
+        if path in ('/', '/index.html', '/openai-images.js', '/generated-gallery.js', '/product-editor.js', '/agent-center.js', '/store-rotation-setup.js', '/discovery-ui.js', '/discovery-browser-ui.js', '/selection.js', '/auth.js', '/studio-migration.js', '/colour-sets.js', '/assistant-chat.js', '/visual-studio.js', '/enhancements.js', '/images.js', '/workflow.js', '/import.js', '/competitors.js', '/sellersprite.js'):
             name = path[1:] if path.endswith('.js') else 'index.html'
             return self.reply(200, (ROOT / name).read_bytes(), 'text/javascript; charset=utf-8' if name.endswith('.js') else 'text/html; charset=utf-8')
         if path.startswith('/uploads/'):
@@ -488,13 +498,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if app_paths.WORKER_USER and not hmac.compare_digest(self.headers.get('X-Junfei-Internal',''),app_paths.INTERNAL_TOKEN):return self.reply(403,{'error':'Private runtime'})
+        path = urlsplit(self.path).path
+        local = local_mode()
+        if local and not self.local_request_allowed(path):
+            return self.reply(403, {'error': '单机工作台只接受本机请求'})
+        if local and path in ACCOUNT_ACTIONS:
+            return self.reply(404, {'error': '单机工作台直接打开使用'})
         # Prevent cross-origin browser writes to the local development server.
         origin = self.headers.get('Origin')
-        extension_capture = urlsplit(self.path).path in ('/api/import/browser', '/api/selection/capture', '/api/selection/capture-seller-store', '/api/auth/extension-login', '/api/auth/extension-status', '/api/auth/extension-logout') and origin and origin.startswith('chrome-extension://')
+        extension_capture = path in CAPTURE_PATHS | EXTENSION_SESSION_PATHS | {'/api/auth/extension-login'} and origin and origin.startswith('chrome-extension://')
         if origin and origin != self.origin() and not extension_capture:
             return self.reply(403, {'error': 'Origin rejected'})
         try:
-            path = urlsplit(self.path).path
             if path == '/api/auth/extension-login':
                 data = json.loads(self.read_body(4096))
                 token, user = accounts.login(data, self.client_address[0])
@@ -503,9 +518,11 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     accounts.logout(token)
                 return self.reply(200, {'user': user, 'token': paired['token']})
-            if path in ('/api/auth/extension-status', '/api/auth/extension-logout'):
+            if path in EXTENSION_SESSION_PATHS:
                 token = self.headers.get('X-Capture-Token', '')
                 user = accounts.identify(token, 'capture')
+                if local and user and user['id'] != accounts.local_workspace()['id']:
+                    user = None
                 if not user: return self.reply(401, {'error': '插件登录已过期或账号已停用，请重新登录'})
                 if path.endswith('/extension-logout'):
                     accounts.logout(token)
@@ -519,33 +536,76 @@ class Handler(BaseHTTPRequestHandler):
                     token, user = accounts.login(data, self.client_address[0])
                     return self.reply(200, {'user': user}, cookie='studio_session='+token+'; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200'+('; Secure' if self.secure_request() else ''))
                 return self.reply(201, accounts.register(data, setup=path.endswith('/setup')))
-            user, codex_scope = (self.codex_identity(path) if self.headers.get('Authorization') and path.startswith('/api/codex/')
-                                 else (accounts.identify(accounts.session_token(self.headers)), None))
-            if path in ('/api/import/browser', '/api/selection/capture', '/api/selection/capture-seller-store') and self.headers.get('X-Capture-Token'):
-                user = accounts.identify(self.headers.get('X-Capture-Token', ''), 'capture')
+            user = accounts.local_workspace() if local else accounts.identify(accounts.session_token(self.headers))
+            capture_token = self.headers.get('X-Capture-Token', '')
+            if path in CAPTURE_PATHS and (capture_token or local):
+                capture_user = accounts.identify(capture_token, 'capture')
+                if local and capture_user and capture_user['id'] != user['id']:
+                    capture_user = None
+                user = capture_user
             if not user:
                 return self.reply(401, {'error': '请先登录；采集插件请填写工作台生成的配对码'})
             if self.headers.get('X-Workspace-Account') not in (None,str(user['id'])):return self.reply(409,{'error':'登录账号已变化，请刷新页面','accountChanged':True})
             if app_paths.WORKER_USER and user['id']!=app_paths.WORKER_USER:return self.reply(403,{'error':'工作空间与账号不匹配'})
             if account_spaces.needs_proxy(user,path):return account_spaces.proxy(self,user)
-            if path.startswith('/api/codex/'):
-                limit=4*1024*1024 if codex_scope and path=='/api/codex/review' else 16*1024
-                data = json.loads(self.read_body(limit))
-                if not isinstance(data, dict):
-                    raise ValueError('操作参数格式无效')
-                return self.codex_route(path, user, codex_scope, data)
-            if path in ('/api/listing-jobs/start','/api/listing-jobs/apply','/api/listing-jobs/resume-review',
-                        '/api/listing-jobs/continue-returned-review','/api/listing-jobs/continue-exhausted-review'):
+            if path in ('/api/image-tools/start','/api/image-tools/retry'):
+                import image_tools
+                data=json.loads(self.read_body(32*1024))
+                with database() as conn:row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                product=next((p for p in (json.loads(row[0]) if row else {}).get('products',[])if p['id']==data.get('productId')),None)
+                if not product:raise ValueError('当前账号没有该商品')
+                return self.reply(200,{'task':image_tools.retry_known_failure(data.get('taskId',''),product) if path.endswith('/retry') else image_tools.start(data,product)})
+            if path in ('/api/image-templates/prepare-mask','/api/image-templates/prepare-source','/api/image-templates/colour-recipe'):
+                data=json.loads(self.read_body(4096))
+                with database() as conn:
+                    row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                product=next((p for p in (json.loads(row[0]) if row else {}).get('products',[]) if p['id']==data.get('productId')),None)
+                if not product:raise ValueError('当前账号没有该商品')
+                if path.endswith('/prepare-source'):
+                    import official_image_templates
+                    return self.reply(200,official_image_templates.canonical_colour_source(data.get('source')))
+                if path.endswith('/colour-recipe'):
+                    import image_engine,sku_colour_recipe
+                    source,_=image_engine.asset(data.get('source'));mask,_=image_engine.asset(data.get('mask'))
+                    if source.size!=mask.size:raise ValueError('色样选区尺寸与原图不一致')
+                    if data.get('renderedImage'):
+                        preview,_=image_engine.asset(data['renderedImage'])
+                        return self.reply(200,sku_colour_recipe.feedback(source,mask,data.get('target'),preview,data.get('settings')))
+                    return self.reply(200,sku_colour_recipe.compile(source,mask,data.get('target')))
+                import image_engine, garment_colour_mask, garment_auto
+                kind=garment_auto.category(product)
+                if kind=='auto':raise ValueError('非服装商品请明确涂选部件')
+                source,sha=image_engine.asset(data.get('source'))
+                protection=image_engine.asset(data['protected'])[0] if data.get('protected') else None
+                mask,receipt=garment_colour_mask.prepare(source,kind,protected=protection)
+                return self.reply(200,{'mask':image_engine.cache(mask),'sourceSha256':sha,'receipt':receipt})
+            if path=='/api/image-engine/prepare-variant-source':
+                import image_source_variants
+                data=json.loads(self.read_body(8192))
+                if not isinstance(data,dict):raise ValueError('颜色选图参数无效')
+                with database() as conn:
+                    row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                product=next((p for p in (json.loads(row[0]) if row else {}).get('products',[]) if p['id']==data.get('productId')),None)
+                if not product:raise ValueError('当前账号没有该商品')
+                return self.reply(200,image_source_variants.prepare(product,data))
+            if path=='/api/image-engine/start':
+                import image_engine
+                data=json.loads(self.read_body(32*1024))
+                with database() as conn:
+                    row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                product=next((p for p in (json.loads(row[0]) if row else {}).get('products',[])
+                              if p['id']==data.get('productId')),None)
+                if not product:raise ValueError('请选择当前账号已有的商品')
+                return self.reply(202,{'task':image_engine.start(data,product)})
+            if path in ('/api/listing-jobs/start' ,'/api/listing-jobs/apply','/api/listing-jobs/resume-review',
+                        '/api/listing-jobs/continue-returned-review','/api/listing-jobs/continue-exhausted-review',
+                        '/api/listing-jobs/continue-format'):
                 data=json.loads(self.read_body(16*1024))
                 if not isinstance(data,dict) or path.endswith('/apply') and set(data)-{'id'}:
                     raise ValueError('文案任务参数无效')
-                if path.endswith('/start'):
-                    if (set(data) != {'productId', 'market', 'requestId', 'expectedRevision', 'confirmPaidText'}
-                            or data.pop('confirmPaidText') is not True
-                            or not isinstance(data['requestId'], str)
-                            or not codex_operations.REQUEST_ID.fullmatch(data['requestId'])):
-                        raise ValueError('请确认文案费用并提供当前版本及请求编号')
-                result=(listing_jobs.start(user['id'],data) if path.endswith('/start') else
+                import listing_format_recovery
+                result=(listing_format_recovery.start(user['id'],data) if path.endswith('/continue-format') else
+                        listing_jobs.start(user['id'],data) if path.endswith('/start') else
                         listing_jobs.resume_review(user['id'],data) if path.endswith('/resume-review') else
                         listing_jobs.continue_returned_review(user['id'],data) if path.endswith('/continue-returned-review') else
                         listing_jobs.continue_exhausted_review(user['id'],data) if path.endswith('/continue-exhausted-review') else
@@ -558,8 +618,7 @@ class Handler(BaseHTTPRequestHandler):
                     row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
                 result=erp_collection.start(user['id'],json.loads(row[0]) if row else {},data)
                 return self.reply(200 if result.get('reused') else 202,{'job':result})
-            if path in ('/api/publication/start','/api/publication/continue','/api/publication/settings','/api/publication/commerce',
-                        '/api/publication/preview','/api/publication/observe'):
+            if path in ('/api/publication/start','/api/publication/continue','/api/publication/settings','/api/publication/commerce'):
                 data=json.loads(self.read_body(32*1024))
                 if path.endswith('/settings'):
                     return self.reply(200,{'target':publication_flow.save_settings(user['id'],data)})
@@ -575,33 +634,12 @@ class Handler(BaseHTTPRequestHandler):
                         conn.execute('UPDATE workspace SET revision=?,body=? WHERE id=1',
                                      (revision+1,json.dumps(workspace,ensure_ascii=False)))
                     return self.reply(200,{'revision':revision+1,'state':workspace})
-                if not isinstance(data, dict):
-                    raise ValueError('发布请求格式无效')
-                if path.endswith('/preview'):
-                    if set(data) != {'action', 'request'}:
-                        raise ValueError('发布预检参数无效')
-                    _, workspace = codex_operations.read_workspace(database)
-                    return self.reply(200, {'preview': publication_flow.preview(user['id'], workspace, data['action'], data['request'])})
-                if path.endswith('/observe'):
-                    if set(data) != {'id'}:
-                        raise ValueError('核对原发布任务仅接受任务编号')
-                    result = publication_flow.observe(user['id'], data['id'])
-                elif path.endswith('/continue') and data.get('observeOnly') is True:
-                    # Existing observation-only clients remain compatible.
-                    result = publication_flow.resume(user['id'], data)
+                if path.endswith('/continue'):
+                    result=publication_flow.resume(user['id'],data)
                 else:
-                    digest, password = data.pop('confirmationDigest', None), data.pop('operatorPassword', None)
-                    if not isinstance(digest, str) or len(digest) != 64:
-                        raise ValueError('请先预检并确认当前发布内容')
-                    accounts.confirm_operator(user, password, self.client_address[0])
-                    if path.endswith('/continue'):
-                        result = publication_flow.resume(user['id'], data, confirmation=digest)
-                    else:
-                        with LOCK, database() as conn:
-                            conn.execute('BEGIN IMMEDIATE')
-                            row = conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
-                            result = publication_flow.start(user['id'], json.loads(row[0]) if row else {}, data,
-                                                            confirmation=digest)
+                    with database() as conn:
+                        row=conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                    result=publication_flow.start(user['id'],json.loads(row[0]) if row else {},data)
                 return self.reply(200 if result.get('reused') else 202,{'job':result})
             if path in ('/api/product-library/add', '/api/product-library/review-supplement'):
                 if user['role']!='admin':
@@ -642,8 +680,12 @@ class Handler(BaseHTTPRequestHandler):
                 result = product_table_export.build(state, data.get('ids'), self.origin())
                 return self.reply(200, result, product_table_export.MIME, download_name='products.xlsx')
             if path.startswith('/api/agent/'):
-                data = json.loads(self.read_body(16 * 1024))
+                data = json.loads(self.read_body(64 * 1024 if path == '/api/agent/rotation-setup' else 16 * 1024))
                 if not isinstance(data, dict): raise ValueError('请求格式无效')
+                if path == '/api/agent/rotation-setup':
+                    import store_rotation_setup
+                    try: return self.reply(200, store_rotation_setup.save(user['id'], data))
+                    except store_rotation_setup.Conflict as error: return self.reply(409, {'error': str(error)})
                 if path == '/api/agent/profile': return self.reply(200, {'profile': agent_center.save_profile(user['id'], data)})
                 if path == '/api/agent/create': return self.reply(201, {'task': agent_center.create(user['id'], data)})
                 if path == '/api/agent/prepare-copy-handoff': return self.reply(200, {'task': agent_center.prepare_copy_handoff(user['id'], data.get('id'), data)})
@@ -974,34 +1016,51 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/settings/test':
                 return self.reply(200, provider.test_key(json.loads(self.read_body(8192))))
             if path == '/api/generate/listing':
-                return self.reply(410, {'error': '请在商品页使用可恢复的 Listing 文案任务'})
+                data = json.loads(self.read_body(128 * 1024))
+                if data.get('productId'):
+                    with database() as conn:
+                        row = conn.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+                    workspace = json.loads(row[0]) if row else {}
+                    product = next((p for p in workspace.get('products',[]) if p['id']==data['productId']),None)
+                    if not product:
+                        raise ValueError('当前账号没有该产品')
+                    return self.reply(200,provider.generate_listing(data.get('product'),data.get('market'),evidence_product=product))
+                return self.reply(200, provider.generate_listing(data.get('product'), data.get('market')))
             if path == '/api/state':
                 request = json.loads(self.read_body(STATE_BODY_LIMIT))
+                state = request['state']
+                if not isinstance(state, dict) or not isinstance(state.get('products'), list) or not isinstance(state.get('copy'), dict) or not isinstance(state.get('reviews'), dict):
+                    raise ValueError('产品库格式不正确')
+                ids = []
+                for p in state['products']:
+                    if not isinstance(p, dict) or not all(isinstance(p.get(k), str) and p[k] for k in ('id', 'name', 'cat', 'owner', 'status', 'color')):
+                        raise ValueError('产品字段不完整')
+                    if any(type(p.get(k)) is not int or not 1 <= p[k] <= 500 for k in ('colors', 'sizes')):
+                        raise ValueError('颜色和尺码数量必须在 1 到 500 之间')
+                    for field in ('brand', 'manufacturer'):
+                        value = p.get(field, '')
+                        if not isinstance(value, str):
+                            raise ValueError('品牌和制造商必须为文字')
+                        p[field] = value.strip() or 'Generic'
+                    ids.append(p['id'])
+                if len(set(ids)) != len(ids):
+                    raise ValueError('父 SKU 不能重复')
+                import product_sku
+                used = {p.get('sku') for p in state['products'] if p.get('sku')}
+                for product in state['products']:
+                    product_sku.ensure(product, user, used)
                 with LOCK, database() as conn:
                     conn.execute('BEGIN IMMEDIATE')
                     row = conn.execute('SELECT revision, body FROM workspace WHERE id=1').fetchone()
                     revision = row[0] if row else 0
-                    previous = json.loads(row[1]) if row else workspace_state.empty()
-                    if 'changes' in request:
-                        current = json.loads(row[1]) if row else workspace_state.empty()
-                        try:
-                            state = workspace_state.apply_changes(current, request['changes'])
-                        except workspace_state.Conflict as error:
-                            return self.reply(409, {'error': str(error), 'revision': revision,
-                                                    'conflict': {'scope': error.scope, 'key': error.key}})
-                    else:
-                        if request.get('revision') != revision:
-                            return self.reply(409, {'error': '另一个页面已修改数据，请备份当前修改后刷新', 'revision': revision})
-                        state = request['state']
-                    workspace_state.validate(previous, state, user)
-                    if state != previous or 'changes' not in request:
-                        revision += 1
-                        conn.execute('INSERT OR REPLACE INTO workspace VALUES (1, ?, ?)',
-                                     (revision, json.dumps(state, ensure_ascii=False)))
-                response = {'revision': revision}
-                if 'changes' in request or request.get('returnState') is True:
-                    response['state'] = state
-                return self.reply(200, response)
+                    if request.get('revision') != revision:
+                        return self.reply(409, {'error': '另一个页面已修改数据，请备份当前修改后刷新', 'revision': revision})
+                    listing_locks.validate_state(json.loads(row[1]) if row else {}, state)
+                    import variant_colours
+                    variant_colours.validate_master_changes(json.loads(row[1]) if row else {}, state)
+                    revision += 1
+                    conn.execute('INSERT OR REPLACE INTO workspace VALUES (1, ?, ?)', (revision, json.dumps(state, ensure_ascii=False)))
+                return self.reply(200, {'revision': revision})
             if path == '/api/upload':
                 body = self.read_body(15 * 1024 * 1024)
                 ext = '.png' if body.startswith(b'\x89PNG\r\n\x1a\n') else '.jpg' if body.startswith(b'\xff\xd8\xff') else '.webp' if body[:4] == b'RIFF' and body[8:12] == b'WEBP' else None
@@ -1029,7 +1088,7 @@ if __name__ == '__main__':
     colour_sets.start_worker()
     start_supplier_workers()
     deploy=DATA/'deployment.json'
-    if deploy.is_file():
+    if deploy.is_file() and not local_mode():
         config=json.loads(deploy.read_text(encoding='utf-8'))
         if config.get('enabled'):
             address=config['address']

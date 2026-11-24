@@ -57,3 +57,12 @@ studio-dev/experiments/
 **/*.safetensors
 **/*.exe
 **/*.zip
+
+# Complete offline assets and target-machine image runtimes
+**/.venv-*/
+**/models/**/runtime.json
+**/official-image-templates/
+**/model-wheels/
+**/wheels/
+**/installers/
+**/settings.local.cmd

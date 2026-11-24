@@ -1,4 +1,4 @@
-import base64,copy,io,zipfile
+import base64,copy,io,zipfile,hashlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from PIL import Image,ImageDraw
@@ -55,7 +55,9 @@ class BridgeTests(VisualTests):
         self.project['productFacts']={'packageContents':'1 pouch','copyNotes':'Accessories unconfirmed'}
         images=[{'_runId':'local-run','final_url':'local:local-run','render_qa':{'ready':True}}]
         artwork=io.BytesIO()
-        Image.new('RGB',(80,60),'green').save(artwork,'PNG')
+        image=Image.new('RGB',(80,60),'green')
+        ImageDraw.Draw(image).rectangle((5,5,74,54),fill='#20a060')
+        image.save(artwork,'PNG')
         with patch.object(bridge,'latest_project',return_value=self.project),patch.object(bridge,'native',return_value={'images':images}),patch.object(visual,'get_run',return_value={'image':'local:local-run'}),patch.object(bridge,'result_image',return_value=(artwork.getvalue(),'image/png')),patch.object(visual,'encode_reference',return_value='source'),patch.object(bridge,'task_new',return_value={}),patch.object(bridge,'task_save'),patch.object(bridge.threading,'Thread',side_effect=lambda target,daemon:SimpleNamespace(start=target)),patch.object(visual,'model_json',return_value={'ready':True,'issues':[]}) as model:
             task=bridge.review_set({}, {'id':'test-product'})
         self.assertEqual(task['status'],'done')
@@ -63,7 +65,7 @@ class BridgeTests(VisualTests):
         self.assertEqual(source,'source')
         self.assertEqual(len(supplements),1)
         self.assertEqual(base64.b64decode(supplements[0].split(',',1)[1]),artwork.getvalue())
-        self.assertEqual(model.call_args.args[1]['supplementalImages'],[{'inputImageNumber':3,'slotNumber':1}])
+        self.assertEqual(model.call_args.args[1]['supplementalImages'],[{'inputImageNumber':3,'slotNumber':1,'sourceSha256':hashlib.sha256(artwork.getvalue()).hexdigest()}])
         self.assertTrue(sheet.startswith('data:image/jpeg;base64,'))
         with Image.open(io.BytesIO(base64.b64decode(sheet.split(',',1)[1]))) as contact:
             self.assertEqual(contact.size,(420,420))
@@ -71,6 +73,36 @@ class BridgeTests(VisualTests):
         self.assertIn('printed SLOT labels',model.call_args.args[0])
         self.assertEqual(model.call_args.args[1]['productFacts'],self.project['productFacts'])
         self.assertIn('severity=error and ready=false',model.call_args.args[0])
+
+    def test_set_review_keeps_close_feature_and_table_pixels_with_reference_numbering(self):
+        # A tiny zipper and decimal measurement disappear in the sheet, yet
+        # both must reach the real reviewer as their unchanged saved artwork.
+        images=[{'_runId':str(n),'final_url':'local:'+str(n),'render_qa':{'ready':True},
+                 'product_presence':presence} for n,presence in enumerate(['hero','hero','supporting','environmental','absent'])]
+        pixels=[]
+        for n in range(len(images)):
+            out=io.BytesIO();picture=Image.new('RGB',(600,600),(25+n*20,95,75));draw=ImageDraw.Draw(picture)
+            draw.rectangle((80,60,520,540),fill=(25+n*20,95,75));draw.line((300,150,305,450),fill='black',width=2)
+            draw.text((305,300),'71.5' if n==4 else str(n),fill='white');picture.save(out,'PNG');pixels.append(out.getvalue())
+        with patch.object(bridge,'latest_project',return_value=self.project),patch.object(bridge,'native',return_value={'images':images}), \
+             patch.object(visual,'get_run',return_value={'image':'local:source'}), \
+             patch.object(bridge,'result_image',side_effect=lambda rid:(pixels[int(rid)],'image/png')), \
+             patch.object(visual,'encode_reference',return_value='source'),patch.object(bridge,'task_new',return_value={}), \
+             patch.object(bridge,'task_save'),patch.object(bridge.threading,'Thread',side_effect=lambda target,daemon:SimpleNamespace(start=target)), \
+             patch.object(bridge.image_quality,'duplicate_issues',return_value=[]), \
+             patch.object(bridge,'verified_set_references',return_value=(['actual-extra-source'],[{'inputImageNumber':3}])), \
+             patch.object(visual,'model_json',return_value={'ready':False,'issues':[{'code':'IDENTITY','severity':'error','message':'Mismatch remains'}]}) as model:
+            task=bridge.review_set({}, {'id':'test-product'})
+        self.assertEqual(task['status'],'done')
+        transmitted=model.call_args.args[2]
+        self.assertEqual(transmitted[2],'actual-extra-source')
+        self.assertEqual([base64.b64decode(value.split(',',1)[1]) for value in transmitted[3:]],pixels)
+        manifest=[{'inputImageNumber':n+4,'slotNumber':n+1,'sourceSha256':hashlib.sha256(raw).hexdigest()} for n,raw in enumerate(pixels)]
+        self.assertEqual(model.call_args.args[1]['supplementalImages'],manifest)
+        saved=visual.get_project(self.project['id'])['set_qa']
+        self.assertEqual(saved['supplementalArtworkReferences'],manifest)
+        self.assertFalse(saved['ready'])
+        self.assertEqual(saved['issues'][0]['code'],'IDENTITY')
 
     def test_regeneration_invalidates_previous_set_review(self):
         self.project['set_qa']={'ready':True,'issues':[]};visual.save_project(self.project)
@@ -93,6 +125,17 @@ class BridgeTests(VisualTests):
         self.assertEqual(updated['plan']['slots'][1]['headline'],'New Heading')
         self.assertEqual(visual.get_project('test')['plan']['slots'][1]['headline'],'Blue Cotton Shirt')
         with self.assertRaises(ValueError):bridge.persist({'projectId':'test','plan':p},{'id':'test-product'})
+
+    def test_supporting_shot_type_edit_is_versioned_and_preserves_original(self):
+        p=bridge.native(self.project,[]);old=p['images'][1]['shot_type'];p['images'][1]['shot_type']='lifestyle' if old!='lifestyle' else 'detail'
+        result=bridge.persist({'projectId':'test','plan':p},{'id':'test-product'})
+        self.assertEqual(visual.get_project(result['id'])['uiPlan']['images'][1]['shot_type'],p['images'][1]['shot_type'])
+        self.assertEqual(bridge.native(visual.get_project('test'),[])['images'][1]['shot_type'],old)
+
+    def test_shot_type_edit_cannot_reclassify_main_or_inject_unknown_type(self):
+        for index,value in [(0,'detail'),(1,'skip_checks')]:
+            p=bridge.native(self.project,[]);p['images'][index]['shot_type']=value
+            with self.assertRaises(ValueError):bridge.persist({'projectId':'test','plan':p},{'id':'test-product'})
 
     def test_history_restore_is_owned_and_resets_manual_approval(self):
         for rid in ('older','newer'):

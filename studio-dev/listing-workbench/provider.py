@@ -1215,7 +1215,9 @@ def finalize_listing_result(result, market, *, facts, plan, keyword_packing, pay
 
 
 def generate_listing(product, market, *, evidence_product=None, _review_recovery=None, _stage_checkpoint=None,
-                     _exhausted_continuation=None):
+                     _exhausted_continuation=None, _returned_draft=None):
+    if _returned_draft is not None and (_review_recovery is not None or _exhausted_continuation is not None):
+        raise ValueError('原稿格式恢复不能混用其他恢复阶段')
     if market not in MARKET_LANGUAGES:
         raise ValueError('请选择支持的站点：US、JP、UK、DE、FR、IT、ES、CA、IN、MX')
     if not isinstance(product, dict) or not product.get('name'):
@@ -1262,12 +1264,13 @@ def generate_listing(product, market, *, evidence_product=None, _review_recovery
             keyword_packing=keyword_packing, payload=payload, skill_snapshot=skill_snapshot,
             material_insights=material_insights, missing=missing, use_sellersprite=use_sellersprite,
             settings=settings, checkpoint=_stage_checkpoint)
-    if _review_recovery is None:
+    reused_draft = _review_recovery if _review_recovery is not None else _returned_draft
+    if reused_draft is None:
         raw = text_completion(request_data,settings)
         receipt_id = save_listing_response(raw,market,provider_name=text_provider_name(settings))
     else:
-        raw = deepcopy(_review_recovery['initialRaw'])
-        receipt_id = _review_recovery['receiptId']
+        raw = deepcopy(reused_draft['initialRaw'])
+        receipt_id = reused_draft['receiptId']
     try:
         choice = raw['choices'][0]
         if choice.get('finish_reason') not in (None, 'stop'):
@@ -1280,7 +1283,7 @@ def generate_listing(product, market, *, evidence_product=None, _review_recovery
             result.pop('alternatives',None)
             draft_keyword_hits = draft_bullet_keyword_hits(result.get('bullets'), facts['keywordPlan'])
             try:
-                result = (merge_polished_listing(result, _review_recovery['edited']) if _review_recovery is not None
+                result = (merge_polished_listing(result, reused_draft['edited']) if reused_draft is not None
                           else polish_listing(result, market=market, policy=policy, facts=payload['confirmed_product_facts'],
                                               photo_observations=payload['confirmed_photo_observations'],
                                               keyword_plan=facts['keywordPlan']))
@@ -1357,6 +1360,12 @@ def resume_listing_review(product, market, *, initial_raw, polished_raw, old_rev
                             _review_recovery=recovery,_stage_checkpoint=checkpoint)
 
 
+def resume_listing_format(product, market, *, initial_raw, polished_raw, receipt_id):
+    """Reuse complete original draft/polish; run the still-unsubmitted review normally."""
+    return generate_listing(product, market, evidence_product=copy.deepcopy(product),
+        _returned_draft={'initialRaw':initial_raw,'edited':response_json(polished_raw),'receiptId':receipt_id})
+
+
 def exhausted_digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
         separators=(',', ':')).encode('utf-8')).hexdigest()
@@ -1374,13 +1383,22 @@ def exhausted_model_identity(settings):
             'credentialSha256': hashlib.sha256(key.encode('utf-8')).hexdigest()}
 
 
-def reconstruct_exhausted_listing(product, market, records):
+def exhausted_targets(value):
+    if (not isinstance(value, list) or not 1 <= len(value) <= 5
+            or any(type(number) is not int or not 1 <= number <= 5 for number in value)
+            or value != sorted(set(value))):
+        raise ValueError('有界接续目标须为明确、不重复的五点序号')
+    return list(value)
+
+
+def reconstruct_exhausted_listing(product, market, records, *, target_bullets=None):
     """Rebuild exactly the returned three repair rounds, including program-inserted cuts.
 
     This pure source reconstruction never treats the failed semantic review as a
     pass and never invokes a model. File hashes/lineage/times are checked by the
     original-task boundary before these already-returned responses are supplied.
     """
+    targets = exhausted_targets([3] if target_bullets is None else target_bullets)
     roles = [None, 'listing_unslop', 'listing_bullet_review', 'listing_bullet_repair',
              'listing_bullet_review', 'listing_bullet_repair', 'listing_bullet_review',
              'listing_bullet_repair', 'listing_bullet_review']
@@ -1460,16 +1478,25 @@ def reconstruct_exhausted_listing(product, market, records):
         iterations.append({'targeted': targeted, 'exactCutsInserted': sorted(exact),
                            'bulletLengths': [len(line) for line in revised.splitlines()]})
     valid, invalid = bullet_review_findings(values[-1], result['bullets'], hit_rows)
-    if (invalid or len(valid) != 1 or valid[0]['bullet'] != 3
-            or review_numbers is not None and valid[0]['bullet'] not in review_numbers):
-        raise ValueError('本接续只接受末次审校第3条唯一有效问题，不消除有效引用')
+    if (invalid or not valid or sorted({issue['bullet'] for issue in valid}) != targets
+            or review_numbers is not None and any(issue['bullet'] not in review_numbers for issue in valid)):
+        raise ValueError('末次有效问题与明确目标五点不一致，不消除有效引用')
     mechanical = listing_bullet_issues(result['bullets'], market=market, facts=facts,
         draft_keyword_hits=hit_rows, semantic_issues=[])
     if mechanical:
         raise ValueError('原最终五点仍有机械检查问题，不扩大接续范围')
     normalized_terms = normalize_backend_terms(result['terms'], result['title'], market)
-    if normalized_terms != result['terms']:
-        raise ValueError('原后台词仍需规范化，不扩大第3条接续范围')
+    # Freeze backend terms after the standard cleanup. If the sole unused
+    # measured keyword token fills the minimum, no model choice is needed.
+    if len(normalized_terms) < TERMS_MIN_CHARS:
+        measured = ' '.join(item['phrase'] for item in facts['keywordPlan']
+                            if item['monthlySearches'] is not None and not RESTRICTED_CLAIMS.search(item['phrase']))
+        unused = normalize_backend_terms(measured, result['title'] + ' ' + normalized_terms, market)
+        if len(search_tokens(unused)) == 1:
+            normalized_terms = normalize_backend_terms(normalized_terms + ' ' + unused, result['title'], market)
+    if set(search_tokens(normalized_terms)) != set(search_tokens(result['terms'])) and isinstance(result.get('translations'), dict):
+        result['translations'].pop('terms', None)
+    result['terms'] = normalized_terms
     validate_title_fields(result, market);validate_market_language(result, market)
     validate_shopper_claims({key: result[key] for key in ('title', 'highlights', 'bullets', 'description', 'terms')})
     validate_backend_length(result['terms'])
@@ -1479,13 +1506,17 @@ def reconstruct_exhausted_listing(product, market, records):
     result['listingSkills'] = skills
     result['generationEngine'] = {'name': 'IvyeaOps production Listing', 'version': 11,
                                   'editingSkill': 'unslop-writing'}
+    revision_schema = {'revisions': [{'bullet': number, 'text': '[Heading] paragraph',
+                                    'translation': 'faithful Simplified Chinese'} for number in targets],
+                       'warnings': ''}
     return {'result': result, 'facts': facts, 'draftKeywordHits': hit_rows, 'lastIssues': valid,
+            'targetBullets': targets,
             'iterations': iterations, 'historicalRepairCount': 3, 'listingSkills': skills,
             'bulletsSha256': hashlib.sha256(result['bullets'].encode('utf-8')).hexdigest(),
             'bulletSha256s': [hashlib.sha256(line.encode('utf-8')).hexdigest() for line in result['bullets'].splitlines()],
-            'repairInstruction': ('CURRENT STAGE: ORIGINAL RETURNED BULLET 3 ONLY. Return exactly '
-                '{"revisions":[{"bullet":3,"text":"[Heading] paragraph","translation":"faithful Simplified Chinese"}],'
-                '"warnings":""}. Other four bullets and all other listing fields are immutable. '
+            'repairInstruction': ('CURRENT STAGE: ORIGINAL RETURNED TARGET BULLETS ONLY: '
+                + ', '.join(map(str, targets)) + '. Return exactly ' + json.dumps(revision_schema)
+                + '. All untargeted bullets and all other listing fields are immutable. '
                 'Correct the supplied valid issue, rather than disputing or ignoring it. Use only confirmed facts. '
                 'Keep one buying point and its direct practical use. Do not reintroduce the cited unrelated feature. '
                 'Use another unused confirmed topic if the old topic lacks enough useful information. '
@@ -1497,16 +1528,18 @@ def reconstruct_exhausted_listing(product, market, records):
 
 def _assert_exhausted_fields_fixed(result, frozen):
     old = frozen['result']
+    targets = exhausted_targets(frozen.get('targetBullets', [3]))
+    fixed = [index for index in range(5) if index + 1 not in targets]
     for key in ('title', 'highlights', 'description', 'terms'):
         if result.get(key) != old.get(key):
             raise ValueError('原稿非目标字段发生变化：' + key)
     old_lines, lines = old['bullets'].splitlines(), result['bullets'].splitlines()
-    if len(lines) != 5 or any(lines[index] != old_lines[index] for index in (0, 1, 3, 4)):
-        raise ValueError('接续改变了第3条之外的五点')
+    if len(lines) != 5 or any(lines[index] != old_lines[index] for index in fixed):
+        raise ValueError('接续改变了指定目标之外的五点')
     old_zh = old.get('translations', {}).get('bullets', '').splitlines()
     zh = result.get('translations', {}).get('bullets', '').splitlines()
-    if len(old_zh) == 5 and (len(zh) != 5 or any(zh[index] != old_zh[index] for index in (0, 1, 3, 4))):
-        raise ValueError('接续改变了第3条之外的五点翻译')
+    if len(old_zh) == 5 and (len(zh) != 5 or any(zh[index] != old_zh[index] for index in fixed)):
+        raise ValueError('接续改变了指定目标之外的五点翻译')
 
 
 def _assert_exhausted_keyword_positions(before_bullets, after_bullets, plan):
@@ -1537,27 +1570,29 @@ def _exhausted_text_json(instruction, payload, *, market, purpose, operation, se
 
 def finish_exhausted_listing(scope, market, *, facts, plan, keyword_packing, payload, skill_snapshot,
                             material_insights, missing, use_sellersprite, settings, checkpoint):
-    """Exactly one bullet3 repair and one full fresh review, without a repair loop."""
+    """One frozen-target repair call and one full fresh review; no repair loop."""
     frozen = scope['frozen']
+    targets = exhausted_targets(frozen.get('targetBullets', [3]))
     if (not callable(checkpoint) or exhausted_model_identity(settings) != scope['modelIdentity']
             or facts != frozen['facts'] or skill_snapshot != frozen['listingSkills']):
         raise ValueError('原任务事实、写作规则或模型身份改变，未调用模型')
     result = deepcopy(frozen['result'])
     valid, invalid = bullet_review_findings({'issues': frozen['lastIssues']}, result['bullets'], frozen['draftKeywordHits'])
-    if invalid or len(valid) != 1 or valid[0]['bullet'] != 3:
+    if invalid or not valid or sorted({issue['bullet'] for issue in valid}) != targets:
         raise ValueError('末次有效问题与冻结原文不符')
     repair, repair_receipt = _exhausted_text_json(frozen['repairInstruction'],
         {'market': market, 'language': MARKET_LANGUAGES[market], 'bullets': result['bullets'].splitlines(),
-         'confirmed_product_facts': payload['confirmed_product_facts'], 'rewrite_bullets': [3],
+         'confirmed_product_facts': payload['confirmed_product_facts'], 'rewrite_bullets': targets,
          'validationIssues': valid, 'draft_bullet_keyword_hits': frozen['draftKeywordHits']},
         market=market, purpose='listing_bullet_exhausted_repair', operation='repair', settings=settings, checkpoint=checkpoint)
     if set(repair) - {'revisions', 'warnings'} or not isinstance(repair.get('warnings', ''), str):
-        raise ValueError('接续只允许第3条修订，不能返回其他字段')
+        raise ValueError('接续只允许指定五点修订，不能返回其他字段')
     revised, translated = merge_bullet_revisions(result['bullets'],
-        result.get('translations', {}).get('bullets', ''), [3], repair.get('revisions'), require_translation=True)
+        result.get('translations', {}).get('bullets', ''), targets, repair.get('revisions'), require_translation=True)
     result['bullets'] = revised
-    if (revised.splitlines()[2] == frozen['result']['bullets'].splitlines()[2]
-            or any(issue['quote'] in revised.splitlines()[2] for issue in frozen['lastIssues'])):
+    if (any(revised.splitlines()[number - 1] == frozen['result']['bullets'].splitlines()[number - 1]
+            for number in targets)
+            or any(issue['quote'] in revised.splitlines()[issue['bullet'] - 1] for issue in frozen['lastIssues'])):
         raise ValueError('接续未移除末次已核实问题的原引用，未继续付费审校')
     if translated:
         result.setdefault('translations', {})['bullets'] = translated
@@ -1566,7 +1601,7 @@ def finish_exhausted_listing(scope, market, *, facts, plan, keyword_packing, pay
     issues = listing_bullet_issues(result['bullets'], market=market, facts=facts,
         draft_keyword_hits=frozen['draftKeywordHits'], semantic_issues=[])
     if issues:
-        raise ValueError('第3条接续未通过机械检查，未继续付费审校：' + str(issues))
+        raise ValueError('指定五点接续未通过机械检查，未继续付费审校：' + str(issues))
     _assert_exhausted_keyword_positions(frozen['result']['bullets'], result['bullets'], facts['keywordPlan'])
     review, review_receipt = _exhausted_text_json(frozen['reviewInstruction'],
         {'market': market, 'bullets': result['bullets'].splitlines(), 'review_bullets': [1, 2, 3, 4, 5],
@@ -1579,9 +1614,11 @@ def finish_exhausted_listing(scope, market, *, facts, plan, keyword_packing, pay
     if listing_bullet_issues(result['bullets'], market=market, facts=facts,
             draft_keyword_hits=frozen['draftKeywordHits'], semantic_issues=[]):
         raise ValueError('接续最终五点检查未通过')
-    result['warnings'] += '\n原任务有界接续第3条：' + repair.get('warnings', '')
+    result['warnings'] += '\n原任务有界接续五点' + ','.join(map(str, targets)) + '：' + repair.get('warnings', '')
     result['generationEngine']['exhaustedContinuation'] = {'id': scope['id'],
-        'scope': 'continue_original_exhausted_bullet3_once', 'historicalRepairCount': 3,
+        'scope': ('continue_original_exhausted_bullet3_once' if targets == [3]
+                  else 'continue_original_exhausted_target_bullets_once'),
+        'targetBullets': targets, 'historicalRepairCount': 3,
         'additionalRepairCount': 1, 'freshReviewCount': 1,
         'repairReceipt': repair_receipt, 'reviewReceipt': review_receipt}
     finished = finalize_listing_result(result, market, facts=facts, plan=plan, keyword_packing=keyword_packing,

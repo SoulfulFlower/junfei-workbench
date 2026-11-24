@@ -3,19 +3,20 @@ renderSettings=async function(){
   await beforeSellerSpriteSettings();
   if(view!=='settings'||document.getElementById('sellerSpriteSettings'))return;
   const panel=document.createElement('section');
+  const local=typeof localWorkbenchMode!=='undefined'&&localWorkbenchMode;
   panel.id='sellerSpriteSettings';panel.className='panel box';panel.style.cssText='max-width:760px;margin-top:22px';
-  panel.innerHTML=`<h2>卖家精灵 MCP · 全员共用</h2>
+  panel.innerHTML=`<h2>卖家精灵 MCP${local?'':' · 全员共用'}</h2>
     <p>连接官方 MCP 获取 ASIN 详情、关键词中文翻译、月搜索量及自然排名。需要卖家精灵 MCP 密钥和相应额度。</p>
     <p style="margin-top:12px"><a href="https://www.sellersprite.com/v3/mcp-manager?tab=keys" target="_blank" rel="noopener">打开 MCP 密钥管理</a> · <a href="https://www.sellersprite.com/v3/knowledge/feature/mcp-installation-tutorial" target="_blank" rel="noopener">官方接入教程</a></p>
     <p class="notice">共享查询缓存已启用：商品详情保留7天，反查词、拓展词和评论保留24小时。同站点、同查询参数重复读取不再调用数据接口；到期后自动更新。失败或空结果不缓存。仅共享卖家精灵原始公开数据，AI分析仍单独调用模型。</p><form id="sellerSpriteForm"><label class="field"><span>MCP 密钥 / 快速集成 URL</span><div style="display:flex;gap:8px"><input id="sellerSpriteKey" type="password" autocomplete="off" placeholder="粘贴密钥或官方快速集成 URL；留空保留已保存配置" style="flex:1;min-width:0"><button type="button" class="btn" id="sellerSpriteEye" aria-label="显示卖家精灵密钥">显示</button></div></label>
-    <p class="sub">由管理员统一配置，所有账号共用 MCP 与额度；产品数据仍按账号独立。密钥在服务器加密保存。连接地址：https://mcp.sellersprite.com/mcp</p>
+    <p class="sub">${local?'密钥加密保存在这台电脑。':'由管理员统一配置，所有账号共用 MCP 与额度；产品数据仍按账号独立。密钥在服务器加密保存。'} 连接地址 https://mcp.sellersprite.com/mcp</p>
     <p id="sellerSpriteState" role="status" style="margin:14px 0">正在读取配置…</p>
     <div class="actions"><button class="btn primary" id="sellerSpriteSave">保存配置</button><button type="button" class="btn" id="sellerSpriteTest">测试连接并获取工具</button><button type="button" class="btn" id="sellerSpriteClear">清除密钥</button></div></form>
     <p id="sellerSpriteResult" role="status" style="margin-top:14px"></p>`;
   appendModelSettingsPanel('seller',panel);
   const key=panel.querySelector('#sellerSpriteKey'),status=panel.querySelector('#sellerSpriteState'),result=panel.querySelector('#sellerSpriteResult');
   const request=async(path,data)=>{const r=await fetch(path,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'请求失败');return d};
-  try{const config=await request('/api/sellersprite/settings');status.textContent=config.hasKey?'✓ 共用 MCP 密钥已保存，所有账号可使用':'尚未配置共用 MCP，请管理员配置';if(!config.canManage){key.closest('label').hidden=true;for(const id of ['sellerSpriteSave','sellerSpriteClear'])panel.querySelector('#'+id).hidden=true;panel.querySelector('#sellerSpriteForm').onsubmit=e=>e.preventDefault();key.disabled=true;panel.querySelector('#sellerSpriteEye').disabled=true}}catch(e){status.textContent=e.message}
+  try{const config=await request('/api/sellersprite/settings');status.textContent=local?(config.hasKey?'✓ MCP 密钥已保存':'请填写卖家精灵 MCP 密钥'):(config.hasKey?'✓ 共用 MCP 密钥已保存，所有账号可使用':'尚未配置共用 MCP，请管理员配置');if(!config.canManage){key.closest('label').hidden=true;for(const id of ['sellerSpriteSave','sellerSpriteClear'])panel.querySelector('#'+id).hidden=true;panel.querySelector('#sellerSpriteForm').onsubmit=e=>e.preventDefault();key.disabled=true;panel.querySelector('#sellerSpriteEye').disabled=true}}catch(e){status.textContent=e.message}
   panel.querySelector('#sellerSpriteEye').onclick=e=>{key.type=key.type==='password'?'text':'password';e.target.textContent=key.type==='password'?'显示':'隐藏';e.target.setAttribute('aria-label',key.type==='password'?'显示卖家精灵密钥':'隐藏卖家精灵密钥')};
   key.oninput=()=>result.textContent='';
   const save=async clear=>{const b=panel.querySelector('#sellerSpriteSave');b.disabled=true;try{const d=await request('/api/sellersprite/settings',{api_key:clear?'':key.value,clearKey:clear});if(clear)key.value='';status.textContent=d.hasKey?'✓ MCP 密钥已加密保存，重启自动加载':'已清除 MCP 密钥';result.textContent='';toast('卖家精灵配置已保存')}catch(e){result.textContent='✕ '+e.message}finally{b.disabled=false}};

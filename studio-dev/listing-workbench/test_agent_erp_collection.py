@@ -10,7 +10,6 @@ import agent_center as agent
 import agent_erp
 import agent_erp_collection as bridge
 import erp_collection as erp
-import publication_policy
 
 
 class FormalERPTests(unittest.TestCase):
@@ -27,9 +26,6 @@ class FormalERPTests(unittest.TestCase):
         self.patches=[patch.object(agent,'DATA',self.root),patch.object(agent,'DB',self.root/'agent.sqlite3'),
             patch.object(agent,'load_workspace',side_effect=lambda:copy.deepcopy(self.workspace)),
             patch.object(agent.discovery_intake,'assert_web_available'),patch.object(erp,'ROOT',self.root/'erp'),
-            patch.object(publication_policy, '_configuration', return_value={'publishing': {
-                'cross_marketplace_followup': {'enabled': True, 'source_marketplace': 'US',
-                                               'target_marketplace': 'UK', 'trigger': 'publishing'}}}),
             patch.object(erp,'destinations',side_effect=lambda user:[self.target] if user==2 else []),
             patch.object(agent_erp,'project_root',return_value=self.root/'legacy'),
             patch.object(erp,'finished_snapshot',side_effect=lambda *args,**kw:copy.deepcopy(self.current)),

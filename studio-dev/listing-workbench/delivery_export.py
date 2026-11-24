@@ -7,6 +7,8 @@ import generated_gallery
 import colour_master
 import variant_colours
 import image_budget
+import image_composition
+from ivyea_pipeline import required_size_chart
 FIELDS=('title','highlights','bullets','description','terms')
 
 def variant_rows(product, sku):
@@ -107,6 +109,9 @@ def build(product,listing,view=None):
         if generated is not None:
             color=image_colour(product,{})
             for raw,info in generated:
+                image_composition.require(raw,slot=info['slot'],product=product,
+                                          detail=bool(info['slot']<len(gallery.get('images',[])) and gallery['images'][info['slot']].get('shot_type')=='detail'),
+                                          size_chart=bool(info['slot']==6 and len(gallery.get('images',[]))==7 and gallery['images'][6].get('size_chart')))
                 number=info['slot']+1
                 ext={'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp'}[info['mime']]
                 name=prefix+(color+str(number).zfill(2) if color else 'A'+str(number))+ext
@@ -126,6 +131,8 @@ def build(product,listing,view=None):
                     excluded.append({'kind':kind,'slot':index,'runId':rid,'reason':'image_review_not_passed'})
                     continue
                 raw,mime=studio_bridge.result_image(rid)
+                if kind=='gallery':
+                    image_composition.require(raw,slot=index,product=product,size_chart=image.get('size_chart') is True,detail=image.get('shot_type')=='detail')
                 ext={'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp'}[mime]
                 if kind=='aplus':
                     name=prefix+'aplus/'+(color or 'Aplus')+str(index+1).zfill(2)+ext
@@ -158,6 +165,9 @@ def build(product,listing,view=None):
                     excluded.append({'setId':variant['id'],'slot':item['slot'],'reason':'variant_review_not_passed'})
                     continue
                 raw,mime=colour_sets.image_bytes(variant['id'],item['slot'])
+                image_composition.require(raw,slot=item['slot'],product=product,
+                                          detail=bool(item['slot']<len(gallery.get('images',[])) and gallery['images'][item['slot']].get('shot_type')=='detail'),
+                                          size_chart=bool(item['slot']==6 and len(gallery.get('images',[]))==7 and gallery['images'][6].get('size_chart')))
                 ext={'image/png':'.png','image/jpeg':'.jpg','image/webp':'.webp'}[mime]
                 counts[color]=max(counts.get(color,0)+1,item['slot']+1)
                 name=prefix+(color+str(counts[color]).zfill(2) if color else 'A'+str(counts[color]))+ext
@@ -224,6 +234,10 @@ def build(product,listing,view=None):
         z.writestr(prefix+'variants.csv','\ufeff'+variants.getvalue())
         z.writestr(prefix+'draft-variant-image-bindings.csv','\ufeff'+draft_csv.getvalue())
         review_issues=[]
+        try:
+            required_size_chart(product,gallery,(row[3] for row in child_rows))
+        except ValueError as error:
+            review_issues.append({'code':'required_apparel_size_chart','message':str(error)})
         if missing:review_issues.append({'code':'missing_images','items':missing})
         if row_image_gaps:review_issues.append({'code':'incomplete_child_image_bindings','items':row_image_gaps})
         if not child_rows:review_issues.append({'code':'no_listing_eligible_children'})

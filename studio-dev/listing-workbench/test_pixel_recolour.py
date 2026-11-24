@@ -34,6 +34,19 @@ class PixelTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'已被修改'):self.save()
         self.assertEqual(pixel.selection(self.row,self.product)['selection']['revision'],1)
 
+    def test_parser_upgrade_preserves_real_saved_edits_without_faking_automatic_provenance(self):
+        record=self.save(edits=[{'method':'source-bound prompted correction','humanReviewed':False}])
+        self.assertNotIn('automaticSelection',record)
+        self.assertFalse(pixel.selection_needs_refresh(record))
+        with patch('garment_auto.identify',side_effect=AssertionError('saved editor mask must not be replaced')):
+            kept=pixel.ensure_automatic_selections(self.product,refresh_legacy=True)[0]
+        self.assertEqual(kept,record)
+        for changed in [{'sourceHash':'different'},{'revision':2}]:
+            stale={**record,'editedSelection':{**record['editedSelection'],**changed}}
+            self.assertTrue(pixel.selection_needs_refresh(stale))
+        automatic={**record,'automaticSelection':{'version':'old-parser'}};automatic.pop('editedSelection')
+        self.assertTrue(pixel.selection_needs_refresh(automatic))
+
     def test_only_absent_product_storyboard_card_can_be_reused_whole(self):
         self.mask=Image.new('L',(40,40),0);self.protect=Image.new('L',(40,40),255)
         with self.assertRaisesRegex(ValueError,'无商品'):self.save(preserveWholeImage=True,confirmed=True)
@@ -44,6 +57,24 @@ class PixelTests(unittest.TestCase):
         self.assertTrue(record['preserveWholeImage']);result=self.render(target='#002200')
         np.testing.assert_array_equal(np.asarray(pixel.image(result['image'])),np.asarray(self.src))
         self.assertFalse(result['humanReviewed'])
+
+    def test_automatic_chart_recolour_preserves_every_pixel_outside_source_photo(self):
+        box=[12,3,30,17]
+        chart=pixel.colour_sets.get('set')
+        chart['items'][0]['sizeChartPreviewBox']=box
+        pixel.colour_sets.save(chart)
+        source=pixel.sources(self.product)['sources'][0]
+        with patch('garment_auto.identify',return_value=(Image.new('L',(18,14),255),{'version':'test'})) as identify:
+            selection=pixel.automatic_selection({**source,'revision':0,'sizeChartPreviewBox':[0,0,40,40]},self.product)['selection']
+        self.assertEqual(identify.call_args.args[0].size,(18,14))
+        self.assertEqual(selection['automaticSelection']['sizeChartPreviewBox'],box)
+        result=pixel.render({**source,'revision':1,'target':'#0870ac'},self.product)
+        original=np.asarray(self.src)
+        actual=np.asarray(pixel.image(result['image']))
+        outside=np.ones(original.shape[:2],dtype=bool)
+        outside[3:17,12:30]=False
+        np.testing.assert_array_equal(actual[outside],original[outside])
+        self.assertTrue(np.any(actual[~outside]!=original[~outside]))
     def test_source_identity_and_product_isolation(self):
         self.save()
         with self.assertRaises(ValueError):pixel.selection(self.row,{'id':'other'})

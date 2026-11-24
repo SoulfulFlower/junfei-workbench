@@ -9,11 +9,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 import ziniao_market
+import ziniao_mfa
 
 PLUGIN_ID = 'acijbilfofphlklghbilbknpdmnholoi'
 POPUP = f'chrome-extension://{PLUGIN_ID}/popup.html'
 COUNTRIES = {'US': '美国', 'UK': '英国'}
 SELLER_URLS = {'US':'https://sellercentral.amazon.com/', 'UK':'https://sellercentral.amazon.co.uk/'}
+SELLER_ENTRY_PATHS = {
+    'US': 'home',
+    'UK': 'amazonsell/business?ref=homepage_direct_serve_ngs',
+}
 
 
 class SiteIdentityError(ValueError):
@@ -26,6 +31,7 @@ class SiteIdentityError(ValueError):
         'seller_header_read_failed': '卖家后台当前店铺市场控件读取失败，未继续插件核对',
         'seller_origin_changed': '卖家后台读取期间域名已变化，未确认目标站点身份',
         'seller_site_unverified': '卖家后台未核对到目标店铺和站点，不打开插件代替登录',
+        'seller_mfa_required': '卖家后台要求双重验证，请在当前紫鸟页面完成验证后从原任务继续',
         'market_selection_unconfirmed': '市场切换已尝试，实际选中站点尚未确认；保留当前页面，不重复点击',
         'seller_return_url_unverified': '缺少同店同站已核实的卖家后台实际网址，不猜测返回页面',
         'seller_return_target_changed': '插件核验后页面目标已变化，未在另一标签恢复卖家后台',
@@ -78,9 +84,9 @@ def check_identity(page, market, seller, account):
     if page.get('url') != POPUP:
         return False
     text = page['content']
-    identity = re.search(r'站点\s+(\S+)\s+店铺\s+(.+?)\s+版本号', text)
-    if identity is None:
+    if not re.search(r'站点\s+\S+\s+店铺\s+\S+\s+版本号', text):
         return False
+    identity=re.search(r'站点\s+(\S+)\s+店铺\s+(.+?)\s+版本号',text)
     if identity.group(2) != seller:
         raise ValueError('插件实际店铺与当前任务不符；未继续 ERP 操作')
     if identity.group(1) != COUNTRIES[market]:
@@ -202,7 +208,8 @@ def ensure_site(cli, *, store_id, store_name, market, seller, timeout=60, allow_
     expected_origin=SELLER_URLS[market].rstrip('/')
     expected_label=' '.join((seller+' '+COUNTRIES[market]).split())
     if page_origin(page)!=expected_origin or (restore and page.get('url')!=restore[0]):
-        run(cli,'page','visit','--store-id',store_id,'--url',restore[0] if restore else SELLER_URLS[market],
+        entry_url=restore[0] if restore else SELLER_URLS[market]+SELLER_ENTRY_PATHS[market]
+        run(cli,'page','visit','--store-id',store_id,'--url',entry_url,
             '--wait-until','domcontentloaded','--timeout','30000')
         # Navigation acknowledgment is not a page identity observation.
         page=content_payload(run(cli,'page','content','--store-id',store_id,'--content-format','text'))
@@ -210,6 +217,7 @@ def ensure_site(cli, *, store_id, store_name, market, seller, timeout=60, allow_
     deadline=time.monotonic()+timeout
     recovery=None
     market_selection=None
+    mfa_recovery=None
     missing_header=False
     while True:
         if restore and page.get('targetId')!=restore[1]:raise SiteIdentityError('seller_return_target_changed')
@@ -218,6 +226,15 @@ def ensure_site(cli, *, store_id, store_name, market, seller, timeout=60, allow_
             recovery=submit_saved_email_form(cli,store_id=store_id,market=market)
             page=content_payload(run(cli,'page','content','--store-id',store_id,'--content-format','text'))
             parsed=urlsplit(page.get('url',''))
+        if page_origin(page)==expected_origin and parsed.path=='/ap/mfa':
+            if mfa_recovery is not None:
+                raise SiteIdentityError('seller_mfa_required')
+            mfa_recovery=ziniao_mfa.submit_autofilled(run,cli,store_id=store_id,
+                origin=expected_origin,deadline=min(deadline,time.monotonic()+12))
+            if mfa_recovery['status']!='left_mfa':
+                raise SiteIdentityError('seller_mfa_required')
+            page=content_payload(run(cli,'page','content','--store-id',store_id,'--content-format','text'))
+            continue
         if page_origin(page)==expected_origin and parsed.path!='/ap/signin':
             header=selected_seller_header(cli,store_id=store_id)
             if header['origin']!=expected_origin:
@@ -247,6 +264,7 @@ def ensure_site(cli, *, store_id, store_name, market, seller, timeout=60, allow_
                             'sellercentralSelection':{'method':'actual_unique_visible_header','label':actual_label,'origin':header['origin'],'url':actual_url},
                             'sellercentralUrl':actual_url,'sellercentralTargetId':page.get('targetId'),'storeId':store_id}
                     if recovery is not None:result['loginRecovery']=recovery
+                    if mfa_recovery is not None:result['mfaRecovery']=mfa_recovery
                     if market_selection is not None:result['marketSelection']={**market_selection,'confirmed':True}
                     return result
         if time.monotonic()>=deadline:

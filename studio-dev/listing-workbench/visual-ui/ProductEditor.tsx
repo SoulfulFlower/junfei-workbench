@@ -9,11 +9,10 @@ import type {KeywordMetric} from './keyword-marks';
 import './product-editor.css';
 import ErpCollection from './ErpCollection';
 import PublicationFlow from './PublicationFlow';
-import CodexOperations from './CodexOperations';
 import {colourDeliveryProgress,masterDeliveryProgress,type DeliveryColours,type SelectedGalleryReadiness} from './delivery-readiness';
 
 const steps = [
-  ['product','素材与洞察'], ['copy','Listing 文案'], ['visual','视觉套图'], ['delivery','交付'],
+  ['product','素材与洞察'], ['copy','Listing 文案'], ['visual','商品作图'], ['delivery','交付'],
 ] as const;
 type Step = typeof steps[number][0];
 type Copy = Record<string, any>;
@@ -320,14 +319,8 @@ function CopyStep({editor}:{editor:Editor}) {
   }
   return <>
     <Section title="文案编辑" hint={editor.market+' 站 · 原文与中文对照 · 自动保存'}
-      actions={<><details className="page-actions"><summary className="btn">文案工具</summary>
-        <div className="page-actions-menu">
-          <button onClick={editor.listingSkills}>文案技能</button>
-          <button onClick={editor.history}>版本对比</button>
-          <button onClick={editor.saveVersion}>保存版本</button>
-          <button disabled={!editor.online} onClick={editor.batchGenerate}>批量生成</button>
-        </div>
-        </details>
+      actions={<><button onClick={editor.listingSkills}>文案技能</button><button onClick={editor.history}>版本对比</button><button onClick={editor.saveVersion}>保存版本</button>
+        <button disabled={!editor.online} onClick={editor.batchGenerate}>批量生成</button>
         <button id="editor-generate" className="pe-primary" disabled={!editor.online||editor.busy||busy==='generate'} onClick={async()=>{setBusy('generate');try{await editor.generate()}finally{setBusy('')}}}><Sparkles size={15}/>{editor.busy||busy==='generate'?'生成中…':editor.copy.title?'重新生成':'生成文案'}</button></>}>
       <div id="listingGenerationProgress"/>
       <div className="pe-actions"><button onClick={()=>setShowTranslation(!showTranslation)}>{showTranslation?'隐藏中文':'显示中文'}</button>
@@ -432,7 +425,7 @@ function DeliveryStep({editor,sets,error,selectedGallery}:{editor:Editor;sets:Cr
   return <>
     <ErpCollection key={editor.accountId+':'+editor.product.id+':'+editor.market} productId={editor.product.id} accountId={editor.accountId} market={editor.market} copy={editor.copy} online={editor.online} beforeStart={editor.prepareCollection} deliveryReady={collectionReady} deliveryBlockReason={collectionBlockReason} onVerified={setErpSourceReadyKey}/>
     {editor.market==='US'&&<PublicationFlow key={editor.accountId+':'+editor.product.id} productId={editor.product.id} accountId={editor.accountId} online={editor.online} beforeStart={editor.prepareCollection} saveCommerce={editor.savePublicationCommerce} sourceReadyKey={erpSourceReadyKey}/>} 
-    <Section title="自动处理状态" hint="文案和套图完成后交接 ERP。产品档案分别显示发布受理和在售核验状态。"
+    <Section title="自动处理状态" hint="文案和套图完成后交接 ERP，发布受理后档案显示已完成。"
       actions={<><button id="wbExport" disabled={!editor.online||!editor.copy.title||exporting}
         onClick={async()=>{setExporting(true);try{await editor.exportZip()}finally{setExporting(false)}}}><Download size={15}/>{exporting?'正在打包…':'下载可选备份 ZIP'}</button></>}>
       {error&&<p role="alert">{error}</p>}<div className="pe-tags">{checks.map(([label,ok])=><span className={ok?'pe-ok':''} key={label}>{ok?'✓':'○'} {label}</span>)}</div>
@@ -449,7 +442,7 @@ function DeliveryStep({editor,sets,error,selectedGallery}:{editor:Editor;sets:Cr
     <Section title="成图墙" hint="点击图片查看原图。"><div className="pe-assets">
       {finals.map(({image,i,kind})=><article key={kind+i}><a href={image.final_url!} target="_blank" rel="noreferrer"><img src={image.final_url!} alt={image.role||'成图 '+(i+1)} loading="lazy"/></a>
         <div><span>{kind==='gallery'?'套图':'A+'} {i+1} · 生成结果</span><a href={image.final_url!} download>下载</a></div></article>)}
-      </div>{!finals.length&&<p>暂无成图，可在视觉套图中制作。</p>}
+      </div>{!finals.length&&<p>暂无成图，可在商品作图中制作。</p>}
     </Section>
     <Section title="导出设置"><label>母版颜色<input defaultValue={editor.product.masterColor||''} maxLength={100} onChange={e=>editor.updateFacts({masterColor:e.currentTarget.value.trim()})}/></label></Section>
     <Tools editor={editor} kind="delivery"/>
@@ -485,9 +478,6 @@ function Workbench({editor}:{editor:Editor}) {
   return <div className="pe-shell">
     <div className="pe-heading"><div><button className="pe-back" onClick={editor.goBack}><ArrowLeft size={16}/> 产品档案</button>
       <h1>Listing 工作台</h1><p>{p.name}</p></div><div className="pe-context product-identity">{editor.identity(p)}</div></div>
-    <CodexOperations key={editor.accountId+':'+p.id+':'+editor.market} productId={p.id} market={editor.market}
-      accountId={editor.accountId} online={editor.online} beforeApproval={editor.prepareCollection}
-      openTasks={()=>{window.location.href='/tasks';}}/>
     <div className="pe-layout"><aside className="pe-rail"><h2>产品项目</h2>
       <label className="pe-search"><Search size={15}/><input aria-label="搜索产品项目" placeholder="搜索名称、SKU 或 ASIN" value={query} onChange={e=>setQuery(e.currentTarget.value)}/></label>
       <div className="pe-projects">{products.map(item=><button key={item.id} className="pe-project-button" aria-current={item.id===p.id?'true':undefined}

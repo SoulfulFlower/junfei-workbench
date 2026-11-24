@@ -6,6 +6,15 @@ import os from 'node:os';
 import {runCollectionWorkflow} from './ego-collection-workflow.mjs';
 import {managedUploadKey} from './ego-collection-upload.mjs';
 import {schemaVariation,chooseCategory,prepareNativeDraft,resolveCategoryHints} from './ego-collection-prepare.mjs';
+
+test('US pants matches the ordinary UK trousers leaf without admitting other branches',()=>{
+ const candidates=[{index:0,text:'Fashion Women Clothing Trousers'},{index:1,text:'Fashion Men Clothing Trousers'},
+  {index:2,text:'Fashion Women Clothing Activewear Trousers'},{index:3,text:'Fashion Women Clothing Underwear Pants'}];
+ const hints={path:'Clothing, Shoes & Jewelry > Women > Clothing > Pants'};
+ assert.equal(chooseCategory(candidates,hints,"Women's Mid-Rise Faux Suede Pants").index,0);
+ assert.throws(()=>chooseCategory(candidates.slice(1),hints,'Women Pants'),/歧义/);
+ assert.throws(()=>chooseCategory([...candidates,{index:4,text:candidates[0].text}],hints,'Women Pants'),/歧义/);
+});
 import {gbTshirtRecommendations,verifiedUsTshirtPath} from './fixtures/gb-category-recommendations.mjs';
 
 async function fixture(t,fail){
@@ -113,6 +122,37 @@ test('ambiguous category candidates and hints are durable before choosing, witho
  assert.deepEqual(record.categoryRecommendationHistory,[original]);assert.equal(record.draftId,'500');
 });
 
+test('a missing verified leaf uses the source title only for a fresh ERP recommendation',async()=>{
+ const listingTitle='Faux Suede Tops for Women, Stand Collar Half-Button Pullover';
+ const sourceTitle="Women's Faux Suede Stand Collar Half Button Pullover Sweatshirt";
+ const path='Clothing, Shoes & Jewelry > Women > Clothing > Active > Active Sweatshirts';
+ const incorrect=[{index:0,text:'Clothing Shoes & Jewelry Women Clothing Tops Tees & Blouses Blouses'}];
+ const exact={index:49,text:'Clothing Shoes & Jewelry Women Clothing Active Active Sweatshirts'};
+ const correct=[exact,{index:50,text:'Clothing Shoes & Jewelry Women Clothing Fashion Hoodies & Sweatshirts Fashion Sweatshirts'}];
+ const input={store:'Target US',goods:{title:listingTitle},destination:{categoryHints:{path,title:sourceTitle}}};
+ const record={draftId:'500',collection:{id:'300'}},activities=[];
+ const replies=[undefined,'Target US',true,incorrect,correct,undefined];
+ const page={goto:async()=>{},waitForFunction:async()=>{},click:async selector=>activities.push(['click',selector]),
+  fill:async(selector,value)=>activities.push(['fill',selector,value]),
+  evaluate:async(fn,arg)=>{
+   if(arg===listingTitle){activities.push(['restore',arg]);return;}
+   if(arg===exact.index)throw Error('Reached intended ERP radio selection');
+   return replies.shift();
+  }};
+ await assert.rejects(prepareNativeDraft(page,input,record,async()=>{}),/Reached intended ERP radio selection/);
+ assert.deepEqual(activities,[
+  ['click','[role=dialog][aria-label="亚马逊产品类型推荐"] .el-dialog__footer button.el-button--default'],
+  ['fill','input[placeholder="产品标题"]',sourceTitle],
+  ['click','loc=role:button[name="自动识别产品类型"]'],
+  ['restore',listingTitle],
+ ]);
+ assert.equal(record.categoryRecommendationHistory[0].title,listingTitle);
+ assert.equal(record.categoryRecommendation.title,sourceTitle);
+ assert.equal(record.categoryChoice.index,exact.index);
+ assert.equal(input.goods.title,listingTitle);
+ assert.equal(record.draftId,'500');
+});
+
 test('size values come from ERP schema and missing/ambiguous sizes block',()=>{
  const meta={country_code:'US',locale:'en_US',hash:'schema',schema_content:{properties:{
   color:{items:{properties:{value:{type:'string'}}}},
@@ -187,6 +227,22 @@ test('native conditional size enums uniquely prove the class and target system w
  assert.equal(schemaVariation(suggested,[{size:'numeric_1'}]).sizeAttributes.size_class,'numeric');
 });
 
+test('SKIRT uses its native size field and proves the class separately for US and GB',()=>{
+ const items=['Brown','Black','White'].flatMap(color=>['S','M'].map(size=>({color,size})));
+ for(const [country,system] of [['US','as1'],['GB','as4']]){
+  const meta=JSON.parse(JSON.stringify(conditionalShirtSchema(country,system)).replaceAll('shirt_size','skirt_size'));
+  meta.product_type_name='SKIRT';
+  const result=schemaVariation(meta,items);
+  assert.deepEqual(result.variationFields,{color:'color.0.value',size:'skirt_size.0.size'});
+  assert.deepEqual(result.sizeValues,{S:'s',M:'m'});
+  assert.deepEqual(result.sizeAttributes,{size_system:system,size_class:'alpha'});
+  assert.equal(result.sizeAttributeSchema.field,'skirt_size');
+  const unknown=structuredClone(meta);delete unknown.schema_content.properties.skirt_size.items.properties.size;
+  assert.throws(()=>schemaVariation(unknown,items),/不支持当前产品/);
+  assert.throws(()=>schemaVariation(meta,[{size:'S'},{size:'numeric_1'}]),/唯一确定尺码类别/);
+ }
+});
+
 test('unproven, mixed and ambiguous size classes or systems stop before a draft save',()=>{
  const items=[{size:'S'},{size:'3XL'}];
  for(const change of [
@@ -211,4 +267,16 @@ test('the actual schema field summary is durable even when variation parsing sto
  await assert.rejects(prepareNativeDraft(page,input,record,async()=>saved.push(structuredClone(record))),/不支持当前产品/);
  assert.deepEqual(saved.at(-1).schemaProof,{country:'US',productType:'SHIRT',hash:'actual-response-hash',variationProperties:{color:['value'],shirt_size:['size_class']},themes:['COLOR_NAME/SIZE_NAME']});
  assert.equal(record.draftId,'500');assert.equal(record.collection.id,'300');assert.equal(record.resolvedDestination,undefined);
+});
+
+// Observed GB COAT uses abbreviated alpha enums, while Amazon labels use X-Small.
+test('alpha size labels resolve XS and XXS without guessing numeric sizes or ambiguous aliases',()=>{
+ const meta={country_code:'GB',locale:'en_GB',hash:'coat-alpha',schema_content:{properties:{
+ color:{items:{properties:{value:{type:'string'}}}},
+ apparel_size:{items:{properties:{size:{enum:['xx_s','x_s','s','m','x_l']}}}},
+ variation_theme:{items:{properties:{name:{enum:['COLOR_NAME/SIZE_NAME']}}}}}}};
+ assert.deepEqual(schemaVariation(meta,[{size:'XX-Small'},{size:'X-Small'},{size:'Small'},{size:'Medium'},{size:'X-Large'}]).sizeValues,{'XX-Small':'xx_s','X-Small':'x_s',Small:'s',Medium:'m','X-Large':'x_l'});
+ const ambiguous=structuredClone(meta);ambiguous.schema_content.properties.apparel_size.items.properties.size.enum.push('xs');
+ assert.throws(()=>schemaVariation(ambiguous,[{size:'X-Small'}]),/尺码枚举/);
+ assert.throws(()=>schemaVariation(meta,[{size:'UK 8'}]),/尺码枚举/);
 });

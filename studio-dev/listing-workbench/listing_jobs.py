@@ -134,6 +134,10 @@ def public(job,*,include_result=False,reused=False):
         recovery = job['reviewRecovery']
         result['reviewRecovery'] = {key:copy.deepcopy(recovery[key]) for key in
             ('id','scope','phase','authorizedAt','originalError','receipts','stageResponses','error','continuation') if key in recovery}
+    if isinstance(job.get('formatRecovery'), dict):
+        recovery = job['formatRecovery']
+        result['formatRecovery'] = {key:copy.deepcopy(recovery[key]) for key in
+            ('id','scope','phase','authorizedAt','originalError','receipts','stageResponses','error') if key in recovery}
     if isinstance(job.get('exhaustedContinuation'), dict):
         continuation = job['exhaustedContinuation']
         result['exhaustedContinuation'] = {key:copy.deepcopy(continuation[key]) for key in
@@ -249,8 +253,7 @@ def recover(conn,job):
         save(conn,job)
 
 
-def start(owner,data,*,handoff=None):
-    import codex_handoff
+def start(owner,data):
     account(owner)
     if not isinstance(data,dict) or set(data)-{'productId','market','requestId','expectedRevision'}:
         raise ValueError('文案任务参数无效')
@@ -269,24 +272,16 @@ def start(owner,data,*,handoff=None):
             job=json.loads(existing['body'])
             if job['productId']!=pid or job['market']!=market:raise ValueError('此请求编号属于其他产品或站点')
             recover(conn,job)
-            codex_handoff.record(conn,handoff,job['id'],'reused')
             return public(job,include_result=True,reused=True)
         existing=conn.execute('SELECT body FROM listing_generation_jobs WHERE owner=? AND product_id=? AND market=? '
             "AND status IN ('queued','running','ready','needs_review') ORDER BY created DESC,id DESC LIMIT 1",(owner,pid,market)).fetchone()
         if existing:
             job=json.loads(existing['body']);recover(conn,job)
-            codex_handoff.record(conn,handoff,job['id'],'reused')
             return public(job,include_result=True,reused=True)
         revision,state=workspace(conn)
         if data.get('expectedRevision') is not None and data['expectedRevision']!=revision:
             raise ValueError('工作空间版本已变化，请保存并刷新当前资料后再生成')
         product=product_for(state,pid)
-        import discovery_intake
-        discovery_intake.assert_web_available(DB.parent, owner, pid)
-        # Research intake and standalone copy have different evidence requirements.
-        from codex_operations import selection_required
-        if selection_required(owner, product, market):
-            raise ValueError('本款来自选品流程，请在任务中心沿原选品任务接续或核对文案')
         previous=(product.get('listingGeneration') or {}).get(market) or {}
         if previous.get('status')=='uncertain':
             raise ValueError('上次文案生成结果未知，请先核对原模型回执，不能重复付费生成')
@@ -305,7 +300,6 @@ def start(owner,data,*,handoff=None):
             'inputDigest':digest(snapshot),'inputSnapshot':snapshot,'sourceRevision':revision}
         conn.execute('INSERT INTO listing_generation_jobs VALUES(?,?,?,?,?,?,?,?,?)',
             (job['id'],owner,pid,market,job['status'],job['createdAt'],job['updatedAt'],request,json.dumps(job,ensure_ascii=False)))
-        codex_handoff.record(conn,handoff,job['id'],'queued')
         write_outcome(conn,state,revision,job,initial=True)
         save(conn,job)
         ACTIVE.add(job['id'])
@@ -596,7 +590,7 @@ def continue_returned_review(owner,data):
     return public(job,reused=False)
 
 
-def exhausted_receipt_bundle(job, refs):
+def exhausted_receipt_bundle(job, refs, *, target_bullets=None):
     """Strict new scope: nine complete task-bound responses, never a legacy fallback."""
     if not isinstance(refs, list) or len(refs) != 9:
         raise ValueError('次数耗尽接续必须提供完整九份原回执及SHA256')
@@ -658,7 +652,8 @@ def exhausted_receipt_bundle(job, refs):
             continue
         if (other.get('listingTask') or {}).get('jobId') == job['id']:
             raise ValueError('原任务存在未纳入冻结的后续模型回执，不能从旧阶段重放')
-    frozen = provider.reconstruct_exhausted_listing(job['inputSnapshot']['product'], job['market'], records)
+    frozen = provider.reconstruct_exhausted_listing(job['inputSnapshot']['product'], job['market'], records,
+                                                   target_bullets=target_bullets)
     if frozen['lastIssues'][0]['reason'] not in original_error:
         raise ValueError('末次有效问题与原失败错误不一致')
     return records, frozen, next(iter(routing))
@@ -669,13 +664,12 @@ def continue_exhausted_review(owner, data):
     required = {'id', 'requestId', 'inputDigest', 'receipts', 'bulletsSha256', 'targetBullets'}
     if (not isinstance(data, dict) or set(data) != required
             or not re.fullmatch(r'[a-f0-9]{32}', str(data.get('id', '')))
-            or not isinstance(data.get('targetBullets'), list) or len(data['targetBullets']) != 1
-            or type(data['targetBullets'][0]) is not int or data['targetBullets'][0] != 3
             or not isinstance(data.get('requestId'), str)
             or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', data['requestId'])
             or not re.fullmatch(r'[a-f0-9]{64}', str(data.get('inputDigest', '')))
             or not re.fullmatch(r'[a-f0-9]{64}', str(data.get('bulletsSha256', '')))):
-        raise ValueError('原稿第3条有界接续参数无效')
+        raise ValueError('原稿指定五点有界接续参数无效')
+    targets = provider.exhausted_targets(data.get('targetBullets'))
     with LOCK, database() as conn:
         conn.execute('BEGIN IMMEDIATE')
         job = owned(conn, owner, data['id']);recover(conn, job)
@@ -687,24 +681,25 @@ def continue_exhausted_review(owner, data):
         revision, state = workspace(conn);product = product_for(state, job['productId'])
         if digest(input_snapshot(state, product, job['market'])) != job['inputDigest']:
             raise ValueError('原产品、文案或锁定已变化，未调用模型')
-        records, frozen, old_routing = exhausted_receipt_bundle(job, data['receipts'])
+        records, frozen, old_routing = exhausted_receipt_bundle(job, data['receipts'], target_bullets=targets)
         if frozen['bulletsSha256'] != data['bulletsSha256']:
             raise ValueError('已审查原最终五点SHA256不符')
         model_identity = provider.exhausted_model_identity(provider.text_settings())
         if (model_identity['provider'], model_identity['model']) != old_routing:
             raise ValueError('当前模型与原已返回稿不同，未扩大接续授权')
         job['exhaustedContinuation'] = {'id':uuid.uuid4().hex,
-            'scope':'continue_original_exhausted_bullet3_once', 'requestId':data['requestId'],
+            'scope':('continue_original_exhausted_bullet3_once' if targets == [3]
+                     else 'continue_original_exhausted_target_bullets_once'), 'requestId':data['requestId'],
             'authorizedAt':stamp(), 'originalError':job.get('error', ''),
             'originalFailureUpdatedAt':job['updatedAt'], 'originalStatus':job['status'],
             'inputDigest':job['inputDigest'], 'receipts':copy.deepcopy(data['receipts']),
             'bulletsSha256':frozen['bulletsSha256'], 'bulletSha256s':frozen['bulletSha256s'],
             'frozen':frozen, 'frozenSha256':digest(frozen), 'modelIdentity':model_identity,
-            'limits':{'targetBullets':[3], 'repairCalls':1, 'freshReviewCalls':1,
+            'limits':{'targetBullets':targets, 'repairCalls':1, 'freshReviewCalls':1,
                       'initialCalls':0, 'polishCalls':0},
             'phase':'queued', 'intents':{}, 'stageResponses':[], 'history':[]}
-        job.update(status='queued', runOwner=RUNTIME, stage='原稿第3条有界接续已排队',
-                   message='保留原九份回执，仅修订第3条一次并重新审校一次')
+        job.update(status='queued', runOwner=RUNTIME, stage='原稿指定五点有界接续已排队',
+                   message='保留原九份回执，仅修订已冻结问题五点一次并重新审校一次')
         write_outcome(conn, state, revision, job);save(conn, job);ACTIVE.add(job['id'])
     try:
         THREAD_FACTORY(target=execute_exhausted_review, args=(owner, job['id']), daemon=True,
@@ -727,11 +722,12 @@ def execute_exhausted_review(owner, jid):
             if (job['status'] != 'queued' or job.get('runOwner') != RUNTIME
                     or continuation.get('phase') != 'queued' or continuation.get('intents')):
                 return
-            records, rebuilt, _ = exhausted_receipt_bundle(job, continuation['receipts'])
+            records, rebuilt, _ = exhausted_receipt_bundle(job, continuation['receipts'],
+                                      target_bullets=continuation['limits']['targetBullets'])
             if digest(rebuilt) != continuation['frozenSha256']:
                 raise ValueError('原稿严格重建或写作规则变化，未调用模型')
             continuation.update(phase='starting', startedAt=stamp())
-            job.update(status='running', stage='原稿第3条接续检查中', message='仅执行已冻结的一次返修和一次新审校')
+            job.update(status='running', stage='原稿指定五点接续检查中', message='仅执行已冻结的一次返修和一次新审校')
             save(conn, job)
         continuation_id = continuation['id']
 

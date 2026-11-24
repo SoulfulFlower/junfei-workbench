@@ -52,3 +52,31 @@ class SourceArtworkTests(unittest.TestCase):
         raw=product_artwork.compose(self.source(),4,'Real detail','Complete source photograph',preserve_full_source=True)
         image=Image.open(io.BytesIO(raw)).resize((200,200))
         self.assertTrue(any(r>200 and g<80 and b<80 for r,g,b in image.getdata()))
+
+    def test_measurement_layout_changes_only_the_changed_table_cell(self):
+        source=self.source()
+        chart={'columns':['Size','Bust','Sleeve Length'],'units':'cm','measurementsScope':'garment_measurements',
+               'rows':[['S','87','65.5'],['M','91','66']]}
+        raw=product_artwork.compose_size_chart(source,chart,'Size Guide')
+        changed={**chart,'rows':[['S','87','66.6'],['M','91','66']]}
+        other=product_artwork.compose_size_chart(source,changed,'Size Guide')
+        self.assertEqual(raw,product_artwork.compose_size_chart(source,chart,'Size Guide'))
+        self.assertNotEqual(raw,other)
+        before,after=[Image.open(io.BytesIO(value)) for value in (raw,other)]
+        self.assertEqual(before.size,(2000,2000))
+        self.assertEqual(before.crop((0,0,2000,600)).tobytes(),after.crop((0,0,2000,600)).tobytes())
+
+    def test_two_size_chart_uses_canvas_without_changing_measurements_or_preview(self):
+        import image_composition
+        chart={'columns':['Size','Waist','Length'],'units':'cm','measurementsScope':'garment_measurements',
+               'rows':[['S','64','41'],['M','68','42']]}
+        original=__import__('copy').deepcopy(chart)
+        raw=product_artwork.compose_size_chart(self.source(),chart,'Size Guide')
+        self.assertEqual(chart,original)
+        review=image_composition.inspect(raw,role='size_chart')
+        self.assertTrue(review['pass'],review)
+        self.assertGreater(review['contentEnvelope']['height'],.6)
+        # The product preview and heading remain independent of table values.
+        other=product_artwork.compose_size_chart(self.source(),{**chart,'rows':[['S','64','41'],['M','69','42']]},'Size Guide')
+        before,after=[Image.open(io.BytesIO(v)) for v in [raw,other]]
+        self.assertEqual(before.crop(product_artwork.SIZE_CHART_PREVIEW_BOX).tobytes(),after.crop(product_artwork.SIZE_CHART_PREVIEW_BOX).tobytes())

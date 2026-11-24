@@ -42,6 +42,24 @@ def setup_needed():
         return c.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 0
 
 
+def local_workspace():
+    """Use the existing desktop workspace ID or provision it without a login."""
+    query = "SELECT * FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+    with connect() as c:
+        row = c.execute(query).fetchone()
+        if row is None:
+            c.execute('BEGIN IMMEDIATE')
+            row = c.execute(query).fetchone()
+            if row is None:
+                uid = next_account_id(c)
+                c.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)',
+                          (uid, 'local-workspace', '本机工作台', '!', 'admin', 'active'))
+                row = c.execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+        if row['status'] != 'active':
+            raise ValueError('本机工作区已停用')
+        return public(row)
+
+
 def next_account_id(c):
     """Keep deleted employee workspace identities from being assigned to new accounts."""
     c.execute('CREATE TABLE IF NOT EXISTS account_sequence(id INTEGER PRIMARY KEY CHECK(id=1),next_id INTEGER NOT NULL)')
@@ -114,36 +132,6 @@ def identify(token, kind='session'):
     with connect() as c:
         row = c.execute('SELECT u.* FROM users u JOIN tokens t ON u.id=t.user_id WHERE t.hash=? AND t.kind=? AND t.expires>? AND u.status=?', (digest(token), kind, time.time(), 'active')).fetchone()
         return public(row) if row else None
-
-
-def issue_codex(user, product, market, lifetime):
-    import json
-    kind = 'codex:' + json.dumps([product, market], ensure_ascii=False, separators=(',', ':'))
-    with connect() as c:
-        c.execute('DELETE FROM tokens WHERE user_id=? AND kind=?', (user, kind))
-        return issue(c, user, kind, lifetime)
-
-
-def identify_codex(token):
-    import json
-    if not re.fullmatch(r'[A-Za-z0-9_-]{43}', token):
-        return None
-    with connect() as c:
-        row = c.execute("""SELECT u.*, t.kind FROM users u JOIN tokens t ON u.id=t.user_id
-            WHERE t.hash=? AND t.kind LIKE 'codex:%' AND t.expires>? AND u.status='active'""",
-                        (digest(token), time.time())).fetchone()
-    if row is None:
-        return None
-    return public(row), tuple(json.loads(row['kind'][6:]))
-
-
-def confirm_operator(user, password, address):
-    if not isinstance(password, str) or not 12 <= len(password) <= 128:
-        raise ValueError('请输入当前工作台账号密码以确认操作')
-    token, operator = login({'username': user['username'], 'password': password}, address)
-    logout(token)
-    if operator['id'] != user['id']:
-        raise ValueError('登录账号已变化，请重新核对')
 
 def logout(token):
     with connect() as c:

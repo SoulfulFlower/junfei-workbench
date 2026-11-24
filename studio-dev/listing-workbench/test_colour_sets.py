@@ -20,6 +20,9 @@ class ColourSetTests(unittest.TestCase):
   self.assertIn('"headline": "Gray wrap front"',colours.variant_artwork_instruction(s,{'slot':1}))
 
  def setUp(self):
+  # State-machine tests use fake URLs; composition has separate raster tests.
+  gate=patch.object(colours,'composition_review',return_value={'pass':True,'issues':[]})
+  gate.start();self.addCleanup(gate.stop)
   self.temp=tempfile.TemporaryDirectory();root=Path(self.temp.name);(root/'uploads').mkdir()
   self.patches=[patch.object(colours,'DB',root/'colour.sqlite3'),patch.object(visual,'DB',root/'visual.sqlite3'),patch.object(image_provider,'ROOT',root),patch.object(visual,'encode_reference',return_value='data:image/png;base64,AA==')]
   for p in self.patches:p.start()

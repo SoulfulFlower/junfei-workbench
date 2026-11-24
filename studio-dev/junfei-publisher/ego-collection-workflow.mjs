@@ -10,6 +10,7 @@ import {saveDraft} from './ego-draft-save.mjs';
 import {readPersistedDraft,verifyPersistedDraft} from './ego-draft-readback.mjs';
 import {verifyRemoteAsset} from './ego-draft-images.mjs';
 import {ensureExplicitDraftGalleries} from './ego-explicit-galleries.mjs';
+import {writeJsonAtomic} from './atomic_write_json.mjs';
 
 const defaults={upload:stageFinishedUploads,collect:collectInbox,rows:collectionRows,join:submitNativeJoin,
  query:queryDrafts,prepare:prepareNativeDraft,save:saveDraft,read:readPersistedDraft,verify:verifyPersistedDraft,remote:verifyRemoteAsset};
@@ -22,7 +23,7 @@ export async function runCollectionWorkflow(page,original,file,adapters={}){
  if(record.accountId!==input.accountId||record.productId!==input.productId||record.snapshotSha256!==input.sha256||record.published!==false||input.mode!=='draft')throw Error('采集回执与本账号产品内容不符');
  if(record.destinationId&&record.destinationId!==input.destination.destinationId)throw Error('采集回执属于其他目标店铺');
  record.stages??={};
- const persist=async()=>{record.updatedAt=new Date().toISOString();await fs.writeFile(file+'.tmp',JSON.stringify(record,null,2));await fs.rename(file+'.tmp',file);};
+ const persist=async()=>{record.updatedAt=new Date().toISOString();await writeJsonAtomic(file,record);};
  const phase=async(key,text,done=false)=>{record.phase=text;record.stages[key]=done?'completed':'running';await persist();};
  try{
   // SKU lookup is always before collection/creation, even after a restart.

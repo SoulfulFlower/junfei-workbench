@@ -22,7 +22,13 @@ export async function saveDraft(page,input,urls,record,persist,patchDraftPayload
   if(box.length){
    if(box.length!==1||!box[0].includes('不在亚马逊选项中。确定要保存吗？')||/发布|删除/.test(box[0]))throw Error('非预期确认，未继续');
    const sel=await page.evaluate(()=>{const box=[...document.querySelectorAll('.el-message-box')].find(e=>e.getBoundingClientRect().width);const es=[...box.querySelectorAll('button')].filter(b=>b.innerText.trim()==='确定');if(es.length!==1)throw Error('保存确认按钮不唯一');es[0].setAttribute('data-enum-save-confirm','true');return '[data-enum-save-confirm]';});
-   record.enumConfirmation=box[0];await persist();await page.click(sel,{label:'确认仅保存已核对的变体草稿'});
+   record.enumConfirmation=box[0];await persist();
+   if(pending||(input.ukPrepared??input).destination?.countryCode==='GB'){
+    await page.focus(sel);
+    const stillOpen=await page.evaluate(()=>{const button=document.querySelector('[data-enum-save-confirm]');const hook=window.__finishedCollectionHook;return document.activeElement===button&&button?.closest('.el-message-box')?.innerText.includes('不在亚马逊选项中。确定要保存吗？')&&hook&&!hook.sent&&!hook.error;});
+    if(!stillOpen)throw Error('原草稿确认框或保存观察变化，未继续');
+    await page.press(sel,'Enter');
+   }else await page.click(sel,{label:'确认仅保存已核对的变体草稿'});
   }
   await page.waitForFunction(()=>window.__finishedCollectionHook?.response||window.__finishedCollectionHook?.error,undefined,{timeout:25000});
  }finally{

@@ -56,10 +56,14 @@ export function installUkExemptionGuard(plan){
    const kind=target.url.href==='https://app.junfeikuajing.com/api/amazon/category/upc-exemption/check'?'check':target.url.href==='https://app.junfeikuajing.com/api/amazon/category/upc-exemption/apply'?'apply':null;
    if(state.error||target.method!=='POST'||!kind||(kind==='apply'&&(plan.mode!=='apply'||state.requests.some(row=>row.kind==='apply'))))throw Error('拦截非目标或重复英国豁免申请写入');
    const payload=JSON.parse(body);
+   // Keep only the five public business-scope fields for a rejected request.
+   // Extra values, headers, credentials and arbitrary request bodies stay out.
+   const rejection={kind,keys:Object.keys(payload).sort(),scope:Object.fromEntries(keys.map(key=>[key,
+    {type:typeof payload[key],...(typeof payload[key]==='string'?{value:payload[key].slice(0,300)}:{})}]))};
    if(JSON.stringify(Object.keys(payload).sort())!==JSON.stringify([...keys].sort())||keys.some(key=>typeof payload[key]!=='string'||!payload[key].trim())||
       payload.country_code!=='GB'||payload.product_type_name!==plan.identity.productType||fold(payload.brand)!==fold(plan.identity.brand)||
       (plan.nativeScope&&keys.some(key=>key==='brand'?fold(payload[key])!==fold(plan.nativeScope[key]):payload[key]!==plan.nativeScope[key]))||
-      (plan.categoryText&&!fold(plan.categoryText).startsWith(fold(payload.primary_category_name)+' ')&&fold(plan.categoryText)!==fold(payload.primary_category_name)))throw Error('拦截英国豁免请求身份或字段变化');
+      (plan.categoryText&&!fold(plan.categoryText).startsWith(fold(payload.primary_category_name)+' ')&&fold(plan.categoryText)!==fold(payload.primary_category_name))){state.rejectedRequest=rejection;throw Error('拦截英国豁免请求身份或字段变化');}
    const record={kind,method:target.method,url:target.url.href,payload,sentAt:new Date().toISOString(),response:null};state.requests.push(record);
    this.addEventListener('loadend',()=>{let body,parseError;try{body=JSON.parse(this.responseText);}catch(error){parseError=String(error.message||error);}record.response={httpStatus:this.status,body,parseError};},{once:true});
    return send.call(this,JSON.stringify(payload));
@@ -71,7 +75,7 @@ export function installUkExemptionGuard(plan){
 }
 
 export function ukExemptionGuardSnapshot(){
- const s=window.__ukExemptionAction;return{present:Boolean(s),token:s?.token,bindings:{open:Boolean(s)&&XMLHttpRequest.prototype.open===s.hookedOpen,send:Boolean(s)&&XMLHttpRequest.prototype.send===s.hookedSend,fetch:Boolean(s?.hookedFetch)&&window.fetch===s.hookedFetch},requests:s?.requests||[],error:s?.error||null,observedAt:new Date().toISOString()};
+ const s=window.__ukExemptionAction;return{present:Boolean(s),token:s?.token,bindings:{open:Boolean(s)&&XMLHttpRequest.prototype.open===s.hookedOpen,send:Boolean(s)&&XMLHttpRequest.prototype.send===s.hookedSend,fetch:Boolean(s?.hookedFetch)&&window.fetch===s.hookedFetch},requests:s?.requests||[],rejectedRequest:s?.rejectedRequest||null,error:s?.error||null,observedAt:new Date().toISOString()};
 }
 
 export function ukExemptionButtonStable(token){

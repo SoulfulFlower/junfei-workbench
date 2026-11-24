@@ -37,10 +37,65 @@ class PublicationFactsTest(unittest.TestCase):
         self.assertEqual(evidence['basis']['supplierLength'], '普通款(50cm<衣长≤65cm)')
         self.assertEqual(product, before)
 
+    def test_freezes_literal_weave_only_from_same_bound_supplier(self):
+        product = self.fixture()
+        supplier = product['sourceImport']['supplier']
+        attributes = supplier['attributes']
+        attributes['工艺'] = '梭织'
+        self.assertEqual(publication_facts(product)['weaveTypeEvidence'], {
+            'source': 'supplier_attribute', 'sourceUrl': supplier['url'], 'field': '工艺',
+            'sourceValue': '梭织', 'value': 'Woven'})
+        attributes['织法'] = '针织'
+        self.assertNotIn('weaveTypeEvidence', publication_facts(product))
+        del attributes['工艺']
+        self.assertEqual(publication_facts(product)['weaveTypeEvidence']['value'], 'Knit')
+        product['sourceUrl'] = 'https://detail.1688.com/offer/1.html'
+        self.assertNotIn('weaveTypeEvidence', publication_facts(product))
+
     def confirmed_condition(self, product):
         return {'source': 'user_confirmation', 'productId': product['id'],
                 'confirmedAt': '2026-11-18T18:00:00+08:00',
                 'instruction': 'Test-only user confirmation: this product is brand new.'}
+
+    def test_product_bound_seller_weave_default_keeps_its_real_source(self):
+        product = self.fixture();product['id'] = 'test-pants'
+        setting = {'value':'Plain','source':'user_configured_defaults','productId':product['id'],
+                   'scope':'missing_catalogue_attribute_only','supplierVerified':False,
+                   'configuredAt':'2026-11-21T15:00:00+08:00','instruction':'Isolated test seller setting'}
+        product['publicationAttributeDefaults'] = {'weaveType':setting}
+        before = copy.deepcopy(product)
+        self.assertEqual(publication_facts(product)['weaveTypeEvidence'], setting)
+        self.assertEqual(product, before)
+        product['sourceImport']['supplier']['attributes']['工艺'] = '针织'
+        self.assertEqual(publication_facts(product)['weaveTypeEvidence']['source'], 'supplier_attribute')
+        self.assertEqual(publication_facts(product)['weaveTypeEvidence']['value'], 'Knit')
+
+    def test_weave_default_cannot_be_inferred_or_borrowed_from_another_product(self):
+        base = self.fixture();base['id'] = 'test-pants'
+        setting = {'value':'Plain','source':'user_configured_defaults','productId':base['id'],
+                   'scope':'missing_catalogue_attribute_only','supplierVerified':False,
+                   'configuredAt':'2026-11-21T15:00:00+08:00','instruction':'Isolated test seller setting'}
+        self.assertNotIn('weaveTypeEvidence', publication_facts(base))
+        for key,value in [('source','agent_guess'),('productId','other'),('supplierVerified',True),
+                          ('value','Satin'),('configuredAt','2026-11-21'),('instruction','')]:
+            product=copy.deepcopy(base)
+            product['publicationAttributeDefaults']={'weaveType':{**setting,key:value}}
+            with self.subTest(field=key), self.assertRaises(ValueError):
+                publication_facts(product)
+
+    def test_rise_stays_supplier_bound_and_closure_keeps_seller_default_provenance(self):
+        product=self.fixture();product['id']='pants'
+        supplier=product['sourceImport']['supplier'];supplier['attributes']['腰型']='中腰'
+        setting={'value':'Button','source':'user_configured_defaults','productId':'pants',
+                 'scope':'missing_catalogue_attribute_only','supplierVerified':False,
+                 'configuredAt':'2026-11-21T15:00:00+08:00','instruction':'Isolated seller setting'}
+        product['publicationAttributeDefaults']={'closureType':setting}
+        facts=publication_facts(product)
+        self.assertEqual(facts['closureTypeEvidence'],setting)
+        self.assertEqual(facts['riseTypeEvidence'],{'source':'supplier_attribute','sourceUrl':supplier['url'],
+                                                  'field':'腰型','sourceValue':'中腰','value':'Mid Rise'})
+        product['sourceUrl']='https://detail.1688.com/offer/1.html'
+        self.assertNotIn('riseTypeEvidence',publication_facts(product))
 
     def test_explicit_user_confirmed_condition_preserves_exact_evidence_without_supplier_inference(self):
         product = self.zip_fixture()
@@ -84,13 +139,16 @@ class PublicationFactsTest(unittest.TestCase):
                     publication_facts(product)
                 self.assertEqual(product, before)
 
-    def test_empty_condition_fields_keep_legacy_supplier_title_fallback_and_unknowns(self):
+    def test_empty_condition_fields_keep_supplier_evidence_or_use_new_default(self):
         product = self.fixture()
         product.update(itemCondition='', itemConditionEvidence={})
         self.assertEqual(publication_facts(product)['itemConditionEvidence']['source'], 'supplier_title')
         product = self.zip_fixture()
         product.update(itemCondition=None, itemConditionEvidence=None)
-        self.assertNotIn('itemCondition', publication_facts(product))
+        facts = publication_facts(product)
+        self.assertEqual(facts['itemCondition'], 'new_new')
+        self.assertEqual(facts['itemConditionEvidence']['source'], 'user_configured_defaults')
+        self.assertEqual(facts['itemConditionEvidence']['configuredAt'], '2026-11-20')
 
     def test_global_policy_overrides_old_product_origin_and_care_without_changing_explicit_size_classification(self):
         product = self.fixture()
@@ -105,13 +163,14 @@ class PublicationFactsTest(unittest.TestCase):
         self.assertEqual(facts['countryOfOriginSource']['source'], 'user_configured_defaults')
         self.assertEqual(facts['careInstructionsSource']['source'], 'user_configured_defaults')
 
-    def test_unknown_or_different_source_never_generates_condition_or_size_classification(self):
+    def test_default_condition_does_not_borrow_unbound_supplier_facts(self):
         for change in (
                 lambda p: p['sourceImport']['supplier'].update(url='https://detail.1688.com/offer/other.html'),
                 lambda p: p['sourceImport']['supplier'].update(title='供应商商品资料不完整'),
                 lambda p: p.update(sourceImport={})):
             product = self.fixture();change(product);facts = publication_facts(product)
-            self.assertNotIn('itemCondition', facts)
+            self.assertEqual(facts['itemCondition'], 'new_new')
+            self.assertEqual(facts['itemConditionEvidence']['source'], 'user_configured_defaults')
             self.assertNotIn('specialSizeType', facts)
         product = self.fixture();product['sourceImport']['supplier']['title'] = '二手非新品女士上衣'
         self.assertNotIn('itemCondition', publication_facts(product))

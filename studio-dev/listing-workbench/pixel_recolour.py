@@ -20,7 +20,7 @@ from colour_tuning import controls
 
 ROOT=app_paths.DATA
 LOCK=threading.RLock()
-VERSION='fabric-tone-v8'
+VERSION='fabric-tone-v9-selective'
 
 def connection():
     c=sqlite3.connect(ROOT/'pixel_recolour.sqlite3',timeout=30)
@@ -75,8 +75,15 @@ def source_row(item):
     if item.get('sourceSha256') and hashlib.sha256(raw).hexdigest()!=item['sourceSha256']:raise ValueError('已锁定母版文件内容变化，请核对原图')
     with Image.open(io.BytesIO(raw)) as im:
         if im.width*im.height>18_000_000:raise ValueError('图片超过1800万像素')
-        return {'slot':item['slot'],'source':item['sourceUpload'],'sourceHash':fingerprint(im),'width':im.width,'height':im.height,
+        source={'slot':item['slot'],'source':item['sourceUpload'],'sourceHash':fingerprint(im),'width':im.width,'height':im.height,
                 'productAbsent':item.get('productAbsent') is True}
+        if item.get('sharedSizeChart'):
+            source['sharedSizeChart']=dict(item['sharedSizeChart'])
+        if item.get('sizeChartPreviewBox'):
+            left,top,right,bottom=item['sizeChartPreviewBox']
+            if not (0<=left<right<=im.width and 0<=top<bottom<=im.height):raise ValueError('尺码图原照片区域无效')
+            source['sizeChartPreviewBox']=[left,top,right,bottom]
+        return source
 
 def sources(product):
     rows=master_items(product)
@@ -123,6 +130,7 @@ def automatic_selection(data,product,*,reset_legacy=False):
     """Generate and save a model selection, without requesting human prompts."""
     import garment_auto
     key,source=resolve(data,product);previous=latest(key,product)
+    if source.get('sharedSizeChart'):raise ValueError('所有变体共用原尺码图，不创建换色选区')
     revision=previous['revision'] if previous else 0
     if type(data.get('revision')) is not int or data['revision']!=revision:raise ValueError('选区版本已变化，请重新载入')
     if previous and data.get('replace') is not True:
@@ -132,7 +140,18 @@ def automatic_selection(data,product,*,reset_legacy=False):
         mask=Image.new('L',original.size);protected=Image.new('L',original.size,255)
         receipt={'type':'automatic-product-absent','automatic':True,'humanReviewed':False,'imageGenerationSubmitted':False}
     else:
-        mask,receipt=garment_auto.identify(original,protected,ROOT/'garment-embeddings','auto' if source.get('uploadedSource') else garment_auto.category(product))
+        category='auto' if source.get('uploadedSource') else garment_auto.category(product)
+        box=source.get('sizeChartPreviewBox')
+        if box:
+            # The native chart renderer owns this rectangle. Keep the verified
+            # table and title outside the recolour selection, even on retry.
+            photo_protection=protected.crop(box)
+            photo_mask,receipt=garment_auto.identify(original.crop(box),photo_protection,ROOT/'garment-embeddings',category)
+            mask=Image.new('L',original.size);mask.paste(photo_mask,box)
+            protected=Image.new('L',original.size,255);protected.paste(photo_protection,box)
+            receipt['sizeChartPreviewBox']=box
+        else:
+            mask,receipt=garment_auto.identify(original,protected,ROOT/'garment-embeddings',category)
     encode=lambda im:base64.b64encode(png(im)).decode()
     # Saving re-resolves the source and checks the revision again after inference.
     summary={k:v for k,v in receipt.items() if k!='selection'}
@@ -142,6 +161,17 @@ def automatic_selection(data,product,*,reset_legacy=False):
     return {'source':source,'selection':record,'automatic':True,'userPointsRequired':False,'renderer':VERSION,'imageGenerationSubmitted':False}
 
 
+def selection_needs_refresh(record):
+    """Parser upgrades must not overwrite a saved editor correction."""
+    import garment_auto
+    if not record or record.get('preserveWholeImage'):return False
+    edited=record.get('editedSelection') or {}
+    if (edited.get('method')=='native_selection_edit' and
+            edited.get('sourceHash')==record.get('sourceHash') and
+            edited.get('revision')==record.get('revision')):return False
+    return (record.get('automaticSelection') or {}).get('version')!=garment_auto.VERSION
+
+
 def ensure_automatic_selections(product,slots=None,*,refresh_legacy=False):
     import garment_auto
     rows=sources(product)['sources'];wanted=set(slots) if slots is not None else {r['slot'] for r in rows}
@@ -149,7 +179,7 @@ def ensure_automatic_selections(product,slots=None,*,refresh_legacy=False):
     for row in rows:
         if row['slot'] not in wanted:continue
         previous=latest(selection_key(product,row),product)
-        legacy=bool(previous and (previous.get('automaticSelection') or {}).get('version')!=garment_auto.VERSION and not previous.get('preserveWholeImage'))
+        legacy=selection_needs_refresh(previous)
         records.append(automatic_selection({**row,'revision':previous['revision'] if previous else 0,'replace':refresh_legacy and legacy},product,reset_legacy=refresh_legacy and legacy)['selection'])
     return records
 
@@ -185,6 +215,7 @@ def inspect_garment(data,product):
 def save_selection(data,product,*,automatic_provenance=None):
     with LOCK:
         key,source=resolve(data,product)
+        if source.get('sharedSizeChart'):raise ValueError('共用尺码图禁止编辑换色选区')
         previous=latest(key,product);revision=previous['revision'] if previous else 0
         if type(data.get('revision')) is not int or data['revision']!=revision:raise ValueError('选区已被修改，请重新载入后再保存')
         size=(source['width'],source['height'])
@@ -212,6 +243,9 @@ def save_selection(data,product,*,automatic_provenance=None):
                 'preserveWholeImage':preserve}
         if automatic_provenance is not None:record['automaticSelection']=automatic_provenance
         elif previous and previous.get('automaticSelection'):record['automaticSelection']=previous['automaticSelection']
+        if automatic_provenance is None:
+            record['editedSelection']={'method':'native_selection_edit','sourceHash':source['sourceHash'],
+                                      'revision':record['revision'],'humanReviewed':False}
         with closing(connection()) as c,c:c.execute('INSERT INTO selections VALUES(?,?,?,?)',(key,revision+1,product['id'],json.dumps(record)))
         return record
 
@@ -221,6 +255,7 @@ def color(value):
 
 def render(data,product):
     key,source=resolve(data,product);record=latest(key,product)
+    if source.get('sharedSizeChart'):raise ValueError('共用尺码图必须原样复用，不能换色')
     if not record or data.get('revision')!=record['revision']:raise ValueError('请先保存当前选区，再预览换色')
     for field in ('alpha','protected','illumination'):
         if record.get(field):
@@ -302,7 +337,7 @@ def commit_batch(data,product):
             if not record or record['revision']!=r['selectionRevision'] or fingerprint(image(item['sourceUpload']))!=r['sourceHash']:raise ValueError('选区版本或母版已变化')
             if hashlib.sha256(image_provider.local_image(r['image'])).hexdigest()!=r['sha256']:raise ValueError('成图内容已变化')
             staged['status']=s['status']
-            colour_sets.prepare_local_repair(staged,{'confirmed':True,'slot':r['slot'],'previousImage':change.get('previousImage'),'image':r['image'],'note':'统一处理链：按原始母版选区换色，保留针织纹理并保护非衣服区域'},product)
+            colour_sets.prepare_local_repair(staged,{'confirmed':True,'slot':r['slot'],'previousImage':change.get('previousImage'),'image':r['image'],'note':'统一处理链：按原始母版选区换色，保留原衣料纹理并保护非衣服区域'},product)
             item['localCorrection']['pixelRecipe']=r;receipts.append(r)
         staged.setdefault('localRepairBatches',[]).append({'time':time.time(),'slots':sorted(slots),'imageSubmissionAllowed':False,'humanReviewed':False,'renderer':VERSION})
         return colour_sets.save(staged)

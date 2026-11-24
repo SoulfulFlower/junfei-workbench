@@ -44,3 +44,4 @@ class CandidateQuoteTests(unittest.TestCase):
     def test_market_loss_is_not_hidden_by_automatically_marked_up_formula_price(self):
         result = calculate({**self.spec, 'marketTotalUsd': 5}, self.config, self.root)
         self.assertFalse(result['positiveEstimatedMarketProfit'])
+

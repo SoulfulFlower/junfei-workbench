@@ -10,6 +10,17 @@ import studio_artwork_review as review
 
 
 class ExistingArtworkReviewTests(unittest.TestCase):
+    def test_explicit_recheck_uses_latest_result_in_both_directions(self):
+        for old_pass, new_pass in [(False, True), (True, False)]:
+            with self.subTest(old_pass=old_pass, new_pass=new_pass):
+                old = {'pass': old_pass, 'issues': [] if old_pass else ['old']}
+                current = {'pass': new_pass, 'issues': [] if new_pass else ['current']}
+                run = {'mode': 'existing_artwork_review', 'selectedJobId': 'selected',
+                       'candidates': [{'jobId': 'selected', 'qc': old}], 'qc': [old, current]}
+                self.assertIs(review.visual._revision_review(run), current)
+                run['mode'] = 'generation'
+                self.assertIs(review.visual._revision_review(run), old)
+
     def setUp(self):
         raw = io.BytesIO(); image=Image.new('RGB', (1600, 1600), '#886644'); draw=ImageDraw.Draw(image)
         for x in range(0,1600,8): draw.line((x,0,x,1600),fill=(80+x%130,55+x%110,35+x%90),width=3)

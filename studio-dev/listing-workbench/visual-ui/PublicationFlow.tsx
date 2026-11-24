@@ -9,11 +9,6 @@ type Job={id:string;destinationId:string;status:string;phase:string;stage?:strin
 type Target={id:string;store:string;target:{storeName?:string;shippingTemplate?:{name:string};brand?:string};ready:boolean;missing:string[]};
 type View={targets:Target[];jobs:Job[];commerce:Record<string,any>;skuCount:number};
 const active=(j?:Job)=>!!j&&['queued','running'].includes(j.status);
-declare global {
- interface Window {
-  confirmPublicationOperation:(accountId:number,action:'start'|'continue',request:Record<string,unknown>)=>Promise<{job:Job}|null>;
- }
-}
 
 export default function PublicationFlow({productId,accountId,online,beforeStart,saveCommerce,sourceReadyKey}:{
  productId:string;accountId:number;online:boolean;beforeStart:()=>Promise<void>;
@@ -73,13 +68,12 @@ export default function PublicationFlow({productId,accountId,online,beforeStart,
   if(action==='retryMainImageSave'&&(!online||busy||active(job)||!correctiveSaveAvailable))throw Error('尚未具备一次明确重新保存的条件，请先核对原记录');
   await beforeStart();
   if(!mounted.current)return;
-  const result=await window.confirmPublicationOperation(accountId,continuing?'continue':'start',
-    continuing?{id:job!.id,confirmed:true,...(action?{[action]:true}:{})}:{productId,destinationId:selected,confirmed:true});
-  if(result&&mounted.current){setData(old=>old?{...old,jobs:[...old.jobs.filter(j=>j.destinationId!==selected),result.job]}:old);setConsent(false);}
+  const result=await api(continuing?'continue':'start',continuing?{id:job!.id,confirmed:true,...(action?{[action]:true}:{})}:{productId,destinationId:selected,confirmed:true});
+  if(mounted.current){setData(old=>old?{...old,jobs:[...old.jobs.filter(j=>j.destinationId!==selected),result.job]}:old);setConsent(false);}
  });
  const observeLatest=()=>run(async()=>{
   if(!online||busy||active(job)||!job?.observeSupported||!job.canObserveLatestReceipts)throw Error('两站原发布回执尚未齐全，请先核对原任务');
-  const result=await api('observe',{id:job.id});
+  const result=await api('continue',{id:job.id,confirmed:true,observeOnly:true});
   if(mounted.current)setData(old=>old?{...old,jobs:[...old.jobs.filter(j=>j.destinationId!==selected),result.job]}:old);
  });
  return <section className="pe-card" aria-label="美国发布接续英国">

@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from urllib.parse import urlsplit
 from datetime import datetime
 
@@ -33,8 +33,7 @@ from publication_browser_result import current_browser_error
 
 ROOT = app_paths.DATA / 'publication-flow'
 SETTINGS = app_paths.DATA / 'publication-settings.json'
-import runtime_environment
-PROJECT = runtime_environment.resource_root(app_paths.APP,Path(__file__).resolve().parent.parent)
+PROJECT = Path(__file__).resolve().parent.parent
 MARKET_DOM_AUTHORIZATIONS = PROJECT / 'automation/ziniao-market-authorizations.json'
 LOCK = threading.RLock()
 ACTIVE = set()
@@ -129,6 +128,17 @@ def source_receipt(user, pid, destination_id):
     return job, source, receipt
 
 
+def _nonblocking_media_advisory(message):
+    """Only the observed US apparel quality notice; never ignore arbitrary warnings."""
+    return (message.get('code') == '18448' and message.get('severity') == 'WARNING'
+            and message.get('message') == '您提交的内容缺少一些关键属性：material, pattern, special_feature。 缺少这些属性不会阻止您的商品在亚马逊上展示。 然而，这会影响您的商品信息的整体质量。'
+            and message.get('attributeNames') == ['material', 'pattern', 'special_feature']
+            and isinstance(message.get('categories'), list)
+            and sorted(message['categories']) == ['MISSING_ATTRIBUTE', 'PRODUCT']
+            and 'enforcements' not in message and message.get('solution', '') == ''
+            and not set(message) - {'code', 'message', 'severity', 'attributeNames', 'categories', 'sku', 'solution', 'childId', 'sources'})
+
+
 def _media_retry_scope(job, record, source):
     """Authorize only a persisted, identity-checked failure of this US task.
 
@@ -187,7 +197,8 @@ def _media_retry_scope(job, record, source):
     if (not isinstance(messages, list) or not messages or observation.get('messageCount') != len(messages)
             or observation.get('unscopedMessageCount') != 0
             or {message.get('childId') for message in messages} != set(failed_ids)
-            or any(str(message.get('code')) not in MEDIA_RETRY_CODES
+            or {message.get('childId') for message in messages if str(message.get('code')) in MEDIA_RETRY_CODES} != set(failed_ids)
+            or any((str(message.get('code')) not in MEDIA_RETRY_CODES and not _nonblocking_media_advisory(message))
                    or message.get('childId') not in children_by_id
                    or message.get('sku') != children_by_id[message['childId']]['sku'] for message in messages)):
         raise ValueError('仅支持已核对的300060或18320图片错误；其他错误须另行处理')
@@ -335,7 +346,6 @@ def public(job):
               'sourceStore', 'targetStore', 'parentSku', 'variantCount', 'status', 'phase', 'error',
               'createdAt', 'updatedAt', 'submittedAt', 'usPublishId', 'ukDraftId', 'ukPublishId', 'reused', 'observationOnly',
               'mediaEpisodeOnly', 'mediaEpisodeObserveOnly', 'ukMediaOnly', 'ukMediaObserveOnly') if k in job}
-    scoped_observation=False
     result.update(observeSupported=True, canObserveLatestReceipts=False,
                   mediaEpisode={'supported': True, 'authorized': False, 'canRetry': False},
                   ukMediaRecovery={'supported': True, 'authorized': False, 'canRetry': False},
@@ -357,7 +367,6 @@ def public(job):
                 try:
                     observation_packet = json.loads((path.parent / 'input.json').read_text(encoding='utf-8'))
                     _observation_scope(job, record, observation_packet['input'])
-                    scoped_observation=True
                     result['canObserveLatestReceipts'] = result.get('status') not in ('queued', 'running')
                 except (ValueError, OSError, KeyError, TypeError):
                     pass
@@ -381,7 +390,7 @@ def public(job):
                     if not isinstance(observation, dict):
                         continue
                     result[station + 'PublicationObservation'] = {field: copy.deepcopy(observation[field]) for field in
-                        ('publishId', 'status', 'failed', 'verification', 'observedAt', 'count', 'childCount','allChildrenOnline') if field in observation}
+                        ('publishId', 'status', 'failed', 'verification', 'observedAt', 'count', 'childCount') if field in observation}
                     if observation.get('failed') is True or observation.get('verification') == 'failed':
                         current_failures.append(station)
                         if station == 'us':
@@ -464,72 +473,8 @@ def public(job):
             r'^(?:Error:\s*)?(?:EGO_PAGE_[A-Z0-9_]+\b|page\.(?:click|waitForFunction) timed out\b|ElementResolutionError\b)',
             diagnostic.strip()):
         result['error'] = '浏览器操作未取得完整回执，请核对原记录后继续；不会自动重发'
-    submitted=result.get('status')=='submitted'
-    def online(station):
-        obs=result.get(station+'PublicationObservation') or {}
-        return (str(obs.get('publishId'))==str(result.get(station+'PublishId')) and
-                obs.get('verification')=='accepted' and obs.get('failed') is False and
-                obs.get('status') in ('online','buyable','active','discoverable') and
-                obs.get('allChildrenOnline') is True and type(obs.get('childCount')) is int and
-                obs['childCount']>0 and obs['childCount']==len(observation_packet['input']['goodsItems']))
-    result.update(publishSubmitted=submitted,onlineVerified=submitted and scoped_observation and all(online(s) for s in ('us','uk')))
-    if result['onlineVerified']:
-        result['phase']='美国和英国全体子 SKU 在售已核验'
+    result.update(publishSubmitted=result.get('status') == 'submitted', onlineVerified=False)
     return result
-
-
-ONLINE_STATUSES = {'online', 'active', 'buyable', 'discoverable'}
-
-
-def online_receipt(user, product, market, job_id, publish_id):
-    """Read the existing ERP observation from the account's original task."""
-    if market not in ('US', 'UK') or not re.fullmatch(r'[1-9]\d*', publish_id):
-        raise ValueError('缺少支持站点的原 ERP 发布编号')
-    job = owned(user, job_id)
-    if job['productId'] != product or public(job)['status'] in ('queued', 'running'):
-        raise ValueError('任务不属于当前商品，或该发布任务仍在读取回执')
-    folder = ROOT / job['id']
-    try:
-        record = json.loads((folder / 'receipt.json').read_text(encoding='utf-8'))
-        source = json.loads((folder / 'input.json').read_text(encoding='utf-8'))['input']
-    except (OSError, KeyError, ValueError) as exc:
-        raise ValueError('工作台缺少原发布回读资料') from exc
-    if (any(data.get(key) != value for data in (source, record) for key, value in
-            (('accountId', user), ('productId', product), ('jobId', job_id)))
-            or not source.get('sha256') or record.get('snapshotSha256') != source['sha256']):
-        raise ValueError('工作台原任务冻结身份不符')
-    if market == 'UK':
-        _observation_scope(job, record, source)
-        source = record['ukPrepare']['preparedInput']
-    publication = record.get(market.lower() + 'Publish') or {}
-    observation = publication.get('latestObservation') or {}
-    online = publication.get('onlineObservation') or {}
-    identity = online.get('identity') or {}
-    target = source.get('destination') or {}
-    parent = source.get('goods', {}).get('parentSku')
-    record_id = str(observation.get('recordId') or '')
-    store = source.get('store')
-    if (str(publication.get('publishId')) != publish_id or str(observation.get('publishId')) != publish_id
-            or observation.get('verification') != 'accepted' or observation.get('failed') is not False
-            or observation.get('status') not in ONLINE_STATUSES or observation.get('allChildrenOnline') is not True
-            or not re.fullmatch(r'[1-9]\d*', record_id) or not store or not parent):
-        raise ValueError('原 ERP 发布任务尚无完整在售回执，请只读核对原任务')
-    if (str(online.get('recordId')) != record_id or str(identity.get('publishId')) != record_id
-            or identity.get('accountId') != user or identity.get('productId') != product
-            or identity.get('parentSku') != parent or identity.get('store') != store
-            or any(str(identity.get(key)) != str(target.get(key)) for key in ('marketId', 'countryCode'))
-            or identity.get('countryCode') != ('US' if market == 'US' else 'GB')):
-        raise ValueError('在售回执身份不完整，请只读刷新原工作台任务')
-    expected = {row['sku'] for row in source['goodsItems']}
-    rows = identity.get('children') or []
-    if (not expected or len(rows) != len(expected) or observation.get('childCount') != len(expected)
-            or {row.get('sku') for row in rows} != expected
-            or any(row.get('status') not in ONLINE_STATUSES
-                   or not re.fullmatch(r'[A-Z0-9]{10}', str(row.get('asin') or '')) for row in rows)):
-        raise ValueError('在售回执缺少原子体状态或 ASIN，请只读刷新原工作台任务')
-    return {'workbench_publication_id': job_id, 'publish_id': publish_id, 'online_record_id': record_id,
-            'marketplace': market, 'store': store, 'parent_sku': parent, 'observed_at': observation['observedAt'],
-            'children': [{key: row[key] for key in ('sku', 'asin', 'status')} for row in rows]}
 
 
 def owned(user, jid):
@@ -540,14 +485,11 @@ def owned(user, jid):
     return json.loads(row[0])
 
 
-def persist(job, *, handoff=None):
+def persist(job):
     job['updatedAt'] = time.time()
     with connect() as db, db:
         db.execute('UPDATE jobs SET status=?,body=? WHERE id=? AND account_id=?',
                    (job['status'], json.dumps(job, ensure_ascii=False), job['id'], job['accountId']))
-        if handoff:
-            import codex_handoff
-            codex_handoff.record(db,handoff,job['id'],'observation_queued')
 
 
 def list_jobs(user, pid=''):
@@ -558,13 +500,12 @@ def list_jobs(user, pid=''):
 
 def view(user, workspace, pid):
     product = collection.product_for(workspace, pid)
-    policy = publication_policy.default_followup('US')
     targets = []
     for destination in collection.destinations(user):
         if destination.get('marketplace') != 'US':
             continue
         pair = next((p for p in pairs(user) if p['sourceDestinationId'] == destination['id']), {})
-        missing = [] if policy else ['默认跨站发布规则未启用']
+        missing = []
         try:
             job, source, _ = source_receipt(user, pid, destination['id'])
         except ValueError as error:
@@ -578,7 +519,7 @@ def view(user, workspace, pid):
             missing.append(str(error))
         targets.append({'id': destination['id'], 'store': destination['store'], 'target': pair,
                         'sourceReady': bool(job), 'ready': not missing, 'missing': missing})
-    return {'targets': targets, 'jobs': list_jobs(user, pid), 'policy': policy,
+    return {'targets': targets, 'jobs': list_jobs(user, pid), 'policy': publication_policy.default_followup('US'),
             'commerce': copy.deepcopy(product.get('erpDelivery', {}).get('UK', {})),
             'skuCount': len(collection.eligible_variant_rows(product))}
 
@@ -608,7 +549,7 @@ def update_commerce(workspace, data):
     product.setdefault('erpDelivery', {})['UK'] = copy.deepcopy(details)
 
 
-def _start_scope(user, workspace, data):
+def start(user, workspace, data):
     if not isinstance(data, dict) or set(data) - {'productId', 'destinationId', 'confirmed'} or data.get('confirmed') is not True:
         raise ValueError('请明确选择“发布美国并接续英国”，草稿采集不授权发布')
     if not publication_policy.default_followup('US'):
@@ -617,95 +558,41 @@ def _start_scope(user, workspace, data):
     ds = [d for d in collection.destinations(user) if d['id'] == data.get('destinationId') and d.get('marketplace') == 'US']
     if len(ds) != 1:
         raise ValueError('请选择本账号美国ERP目标')
-    return product, ds[0]
-
-
-def _start_preview(user, workspace, product, destination):
-    pair = next((p for p in pairs(user) if p['sourceDestinationId'] == destination['id']), {})
-    source_job, source, receipt = source_receipt(user, product['id'], destination['id'])
-    with tempfile.TemporaryDirectory(prefix='junfei-publication-check-') as tmp:
-        fresh = collection.finished_snapshot(user, product, workspace.get('copy', {}).get(product['id'] + '-US', {}),
-                                            destination, Path(tmp), source)
-    if collection_inputs.content_digest(fresh) != collection_inputs.content_digest(source):
-        raise ValueError('当前成品与美国原草稿不同，请先核对更新原采集记录')
-    commerce = publication_inputs.uk_publication_inputs(source, product, pair)
-    facts = publication_inputs.publication_facts(product)
-    missing_facts = publication_inputs.us_publication_missing_facts(facts)
-    if missing_facts:
-        raise ValueError('，'.join(missing_facts))
-    frozen = copy.deepcopy(source)
-    frozen['destination'].update(receipt.get('resolvedDestination', {}), draftId=receipt['draftId'],
-                                 destinationId=destination['id'], erpAccountId=source['destination']['erpUserId'])
-    frozen['urls'] = {k: (v.get('url') if isinstance(v, dict) else v) for k, v in receipt.get('uploads', {}).items()}
-    frozen.update(commerce)
-    frozen['publicationFacts'] = facts
-    details = {'productId': product['id'], 'productName': product.get('name'),
-               'sourceStore': source['store'], 'targetStore': pair['storeName'],
-               'destinationId': destination['id'], 'collectionId': source_job['id'],
-               'draftId': receipt['draftId'], 'parentSku': source['goods']['parentSku'],
-               'variantCount': len(source['goodsItems'])}
-    return details, frozen
-
-
-def _confirmation_digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                     separators=(',', ':')).encode('utf-8')).hexdigest()
-
-
-def _resume_preview(owner, job, data):
-    folder = ROOT / job['id']
-    sources = {}
-    for name in ('input.json', 'receipt.json'):
-        path = folder / name
-        if path.is_file():
-            sources[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-    details = {key: job.get(key) for key in ('id', 'productId', 'productName', 'sourceStore', 'targetStore',
-                                             'destinationId', 'parentSku', 'variantCount', 'phase')}
-    return {**details, 'digest': _confirmation_digest([owner, 'continue', job, data, sources])}
-
-
-def preview(owner, workspace, action, data):
-    with LOCK:
-        if action == 'start':
-            product, destination = _start_scope(owner, workspace, data)
-            details, frozen = _start_preview(owner, workspace, product, destination)
-            return {**details, 'digest': _confirmation_digest([owner, action, details, frozen, destination])}
-        if action == 'continue' and isinstance(data, dict) and data.get('id') and 'observeOnly' not in data:
-            job = owned(owner, data['id'])
-            return _resume_preview(owner, job, data)
-    raise ValueError('请选择正式发布或修复操作')
-
-
-def observe(user, job_id, *, handoff=None):
-    return resume(user, {'id': job_id, 'confirmed': True, 'observeOnly': True}, handoff=handoff)
-
-
-def start(user, workspace, data, *, confirmation=None):
-    product, destination = _start_scope(user, workspace, data)
     with LOCK, connect() as db, db:
         db.execute('BEGIN IMMEDIATE')
         prior = db.execute('SELECT body FROM jobs WHERE account_id=? AND product_id=? AND destination_id=?',
-                           (user, product['id'], destination['id'])).fetchone()
+                           (user, product['id'], ds[0]['id'])).fetchone()
         if prior:
             return {**public(json.loads(prior[0])), 'reused': True}
-        details, frozen = _start_preview(user, workspace, product, destination)
-        if confirmation is not None and confirmation != _confirmation_digest([user, 'start', details, frozen, destination]):
-            raise ValueError('发布预检内容已变化，请重新核对')
-        job = {'id': uuid.uuid4().hex, 'accountId': user, 'productId': product['id'],
-               'productName': details['productName'], 'destinationId': destination['id'],
-               'sourceCollectionId': details['collectionId'], 'sourceStore': details['sourceStore'],
-               'targetStore': details['targetStore'], 'parentSku': details['parentSku'],
-               'variantCount': details['variantCount'], 'status': 'queued', 'phase': '等待美国发布与英国接续',
-               'createdAt': time.time(), 'runOwner': RUNTIME, 'ownerPid': os.getpid(),
-               'policy': publication_policy.default_followup('US')}
-        if confirmation is not None:
-            job['operatorConfirmation'] = {'accountId': user, 'at': time.time(), 'digest': confirmation}
-        frozen['runtime'] = {'pythonExecutable': sys.executable,'bundledValidator':bool(getattr(sys,'frozen',False))}
+        pair = next((p for p in pairs(user) if p['sourceDestinationId'] == ds[0]['id']), {})
+        source_job, source, receipt = source_receipt(user, product['id'], ds[0]['id'])
+        with tempfile.TemporaryDirectory(prefix='junfei-publication-check-') as tmp:
+            fresh = collection.finished_snapshot(user, product, workspace.get('copy', {}).get(product['id'] + '-US', {}),
+                                                ds[0], Path(tmp), source)
+        if collection_inputs.content_digest(fresh) != collection_inputs.content_digest(source):
+            raise ValueError('当前成品与美国原草稿不同，请先核对更新原采集记录')
+        commerce = publication_inputs.uk_publication_inputs(source, product, pair)
+        facts = publication_inputs.publication_facts(product)
+        missing_facts = publication_inputs.us_publication_missing_facts(facts)
+        if missing_facts:
+            raise ValueError('，'.join(missing_facts))
+        job = {'id': uuid.uuid4().hex, 'accountId': user, 'productId': product['id'], 'productName': product.get('name', ''),
+               'destinationId': ds[0]['id'], 'sourceCollectionId': source_job['id'], 'sourceStore': source['store'],
+               'targetStore': pair['storeName'], 'parentSku': source['goods']['parentSku'], 'variantCount': len(source['goodsItems']),
+               'status': 'queued', 'phase': '等待美国发布与英国接续', 'createdAt': time.time(),
+               'runOwner': RUNTIME, 'ownerPid': os.getpid(), 'policy': publication_policy.default_followup('US')}
+        frozen = copy.deepcopy(source)
+        frozen['destination'].update(receipt.get('resolvedDestination', {}), draftId=receipt['draftId'],
+                                     destinationId=ds[0]['id'], erpAccountId=source['destination']['erpUserId'])
+        frozen['urls'] = {k: (v.get('url') if isinstance(v, dict) else v) for k, v in receipt.get('uploads', {}).items()}
+        frozen.update(commerce)
+        frozen['publicationFacts'] = facts
+        frozen['runtime'] = {'pythonExecutable': sys.executable}
         frozen['jobId'] = job['id']
         # This exists before a worker is launched; it is never regenerated on resume.
-        write_json(ROOT / job['id'] / 'input.json', {'input': frozen, 'connection': destination})
+        write_json(ROOT / job['id'] / 'input.json', {'input': frozen, 'connection': ds[0]})
         db.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?)',
-                   (job['id'], user, product['id'], destination['id'], job['status'], json.dumps(job, ensure_ascii=False)))
+                   (job['id'], user, product['id'], ds[0]['id'], job['status'], json.dumps(job, ensure_ascii=False)))
         ACTIVE.add(job['id'])
     threading.Thread(target=execute, args=(job,), daemon=True).start()
     return public(job)
@@ -744,14 +631,114 @@ def _append_us_pants_rise(job, folder, packet, evidence):
     job.setdefault('amendments', []).append({'id': amendment_id, 'kind': 'us_pants_rise', 'evidence': evidence})
 
 
-def resume(user, data, *, confirmation=None, handoff=None):
+def _append_uk_sweatshirt_weave(user, job, folder, packet, evidence):
+    receipt = json.loads((folder / 'receipt.json').read_text(encoding='utf-8'))
+    original = packet['input']
+    prepared = receipt.get('ukPrepare') or {}
+    schema = prepared.get('schemaObservation') or {}
+    instructions = {'Knit': '针织（Knit）', 'Woven': '梭织（Woven）'}
+    if (not isinstance(evidence, dict) or set(evidence) != {'value', 'source', 'instruction', 'productId', 'sourceUrl'}
+            or not isinstance(evidence['value'], str) or evidence['value'] not in instructions
+            or evidence['source'] != 'user_confirmation' or evidence['instruction'] != instructions[evidence['value']]
+            or evidence['productId'] != job['productId']
+            or not isinstance(evidence['sourceUrl'], str) or not re.fullmatch(r'https://detail\.1688\.com/offer/\d+\.html', evidence['sourceUrl'])
+            or evidence['sourceUrl'] != original.get('goods', {}).get('sourceUrl')
+            or receipt.get('jobId') != job['id'] or receipt.get('productId') != job['productId']
+            or receipt.get('accountId') != user or receipt.get('snapshotSha256') != original.get('sha256')
+            or receipt.get('phase') != 'uk_preparation' or receipt.get('ukPublish')
+            or not receipt.get('usPublish', {}).get('publishId') or receipt.get('ukCopy', {}).get('phase') != 'copy_verified'
+            or schema.get('country_code') != 'GB' or schema.get('product_type_name') != 'SWEATSHIRT'
+            or 'weave_type' not in (receipt.get('error') or '')
+            or any(prepared.get(key) for key in ('saveIntendedAt', 'requestSent', 'submitted'))):
+        raise ValueError('须在原英国卫衣保存前核对同货源的明确织法确认')
+    amended = copy.deepcopy(packet)
+    preparation = amended['input'].setdefault('ukPreparation', {})
+    prior = preparation.get('sweatshirtWeave')
+    if prior and prior != evidence:
+        raise ValueError('原英国卫衣织法确认存在冲突')
+    if prior:
+        return
+    preparation['sweatshirtWeave'] = evidence
+    amendment_id = uuid.uuid4().hex
+    write_json(folder / 'amendments' / (amendment_id + '.json'), {
+        'at': time.time(), 'kind': 'uk_sweatshirt_weave', 'evidence': evidence, 'previousInput': packet})
+    write_json(folder / 'input.json', amended)
+    job.setdefault('amendments', []).append({'id': amendment_id, 'kind': 'uk_sweatshirt_weave', 'evidence': evidence})
+
+
+def _append_us_sleeve_type(user, job, folder, packet, evidence):
+    """Add a reviewed construction fact before the original US Save only."""
+    source = packet['input']
+    receipt = json.loads((folder / 'receipt.json').read_text(encoding='utf-8'))
+    prepared = receipt.get('usPrepare') or {}
+    schema = prepared.get('schemaObservation') or {}
+    fields = {'value', 'sourceUrl', 'referenceImage', 'referenceSha256', 'observations'}
+    if (not isinstance(evidence, dict) or set(evidence) != fields
+            or any(not isinstance(v, str) or not 0 < len(v) <= 2000 for v in evidence.values())
+            or evidence['value'] != 'Cuff Sleeve'
+            or evidence['sourceUrl'] != source.get('goods', {}).get('sourceUrl')
+            or evidence['sourceUrl'] != source.get('publicationFacts', {}).get('supplierModelNumberEvidence', {}).get('sourceUrl')
+            or not re.fullmatch(r'/uploads/[a-zA-Z0-9_-]+\.(png|jpg|jpeg|webp)', evidence['referenceImage'])
+            or not re.fullmatch(r'[a-f0-9]{64}', evidence['referenceSha256'])
+            or job.get('accountId') != user or receipt.get('accountId') != user
+            or receipt.get('jobId') != job['id'] or receipt.get('productId') != job['productId']
+            or receipt.get('snapshotSha256') != source.get('sha256')
+            or receipt.get('phase') != 'us_preparation' or receipt.get('usPublish')
+            or schema.get('country_code') != 'US' or schema.get('product_type_name') != 'SHIRT'
+            or 'sleeve' not in receipt.get('error', '')
+            or any(prepared.get(k) for k in ('saveIntendedAt', 'requestSent', 'submitted'))
+            or (app_paths.WORKER_USER and app_paths.WORKER_USER != user)):
+        raise ValueError('袖型只能在原美国上衣尚未保存或发布时，凭同款供货照片补充')
+    with closing(sqlite3.connect(app_paths.DATA / 'studio.sqlite3')) as db:
+        row = db.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+    product = collection.product_for(json.loads(row[0]) if row else {}, job['productId'])
+    supplier = product.get('sourceImport', {}).get('supplier', {})
+    assets = [a for a in product.get('assets', []) if a.get('url') == evidence['referenceImage']
+              and a.get('source') == '供应商图']
+    if (product.get('sourceUrl') != evidence['sourceUrl'] or supplier.get('url') != evidence['sourceUrl']
+            or len(assets) != 1 or assets[0].get('sha256') != evidence['referenceSha256']):
+        raise ValueError('袖型参考图未绑定当前账号本款供货资料')
+    import image_provider
+    if hashlib.sha256(image_provider.local_image(evidence['referenceImage'])).hexdigest() != evidence['referenceSha256']:
+        raise ValueError('袖型供货参考图内容变化')
+    amended = copy.deepcopy(packet)
+    fact = {**evidence, 'source': 'bound_supplier_photo_review', 'reviewerType': 'agent', 'humanReviewed': False}
+    preparation = amended['input'].setdefault('usPreparation', {})
+    if preparation.get('sleeveType'):
+        if preparation['sleeveType'] != fact:
+            raise ValueError('已保留袖型依据存在冲突')
+        return
+    preparation['sleeveType'] = fact
+    amendment_id = uuid.uuid4().hex
+    write_json(folder / 'amendments' / (amendment_id + '.json'), {
+        'at': time.time(), 'kind': 'us_sleeve_type', 'evidence': fact, 'previousInput': packet})
+    write_json(folder / 'input.json', amended)
+    job.setdefault('amendments', []).append({'id': amendment_id, 'kind': 'us_sleeve_type', 'evidence': fact})
+
+
+def resume(user, data):
+    if isinstance(data, dict) and 'ukCoatWeave' in data:
+        if set(data) != {'id', 'confirmed', 'ukCoatWeave'} or data['confirmed'] is not True:
+            raise ValueError('英国外套经营默认须单独沿原任务补充')
+    if isinstance(data, dict) and 'usCoatFacts' in data:
+        if set(data) != {'id', 'confirmed', 'usCoatFacts'} or data['usCoatFacts'] is not True or data['confirmed'] is not True:
+            raise ValueError('外套同货源属性须单独沿原任务补充')
+    if isinstance(data, dict) and 'usSkirtFacts' in data:
+        if set(data) != {'id', 'confirmed', 'usSkirtFacts'} or data['usSkirtFacts'] is not True or data['confirmed'] is not True:
+            raise ValueError('短裙供货属性修订须单独提交')
+    if isinstance(data, dict) and 'usSleeveType' in data:
+        if set(data) != {'id', 'confirmed', 'usSleeveType'} or data['confirmed'] is not True:
+            raise ValueError('美国上衣袖型修订须单独提交同款供货照片依据')
     if isinstance(data, dict) and 'ukPantsWeave' in data:
         if set(data) != {'id', 'confirmed', 'ukPantsWeave'} or data['confirmed'] is not True:
             raise ValueError('英国裤装织法修订须单独确认')
     if isinstance(data, dict) and 'usPantsRise' in data:
         if set(data) != {'id', 'confirmed', 'usPantsRise'} or data['confirmed'] is not True:
             raise ValueError('美国裤装腰型修订须单独确认')
-    if not isinstance(data, dict) or set(data) - {'id', 'confirmed', 'usPantsRise', 'ukPantsWeave', 'ukCategoryPath', 'categoryEvidence', 'ukShippingTemplate', 'shippingEvidence', 'ukWaterResistanceLevel', 'waterResistanceEvidence', 'retryMediaFailures', 'observeOnly', 'repairMainImage', 'retryMainImageSave', 'repairRequiredAttributes', 'requiredAttributeRepair', 'retryMediaEpisode', 'mediaEpisodeEvidence', 'resumeRequiredAttributesPreclick', 'resumeRequiredAttributesRetryPreflight', 'repairIdentifiers', 'identifierEvidence', 'retryUkMediaFailures', 'ukMediaEvidence'} or data.get('confirmed') is not True:
+    if isinstance(data, dict) and 'ukSweatshirtWeave' in data:
+        if set(data) != {'id', 'confirmed', 'ukSweatshirtWeave'} or data['confirmed'] is not True:
+            raise ValueError('英国卫衣织法修订须单独确认')
+    if not isinstance(data, dict) or set(data) - {'id', 'confirmed', 'ukCoatWeave', 'usCoatFacts', 'usSkirtFacts', 'usSleeveType', 'usPantsRise', 'ukPantsWeave', 'ukSweatshirtWeave', 'ukCategoryPath', 'categoryEvidence', 'ukShippingTemplate', 'shippingEvidence', 'ukWaterResistanceLevel', 'waterResistanceEvidence', 'retryMediaFailures', 'observeOnly', 'repairMainImage', 'retryMainImageSave', 'repairRequiredAttributes', 'requiredAttributeRepair', 'retryMediaEpisode', 'mediaEpisodeEvidence', 'resumeRequiredAttributesPreclick', 'resumeRequiredAttributesRetryPreflight', 'repairIdentifiers', 'identifierEvidence', 'retryUkMediaFailures', 'ukMediaEvidence'} or data.get('confirmed') is not True:
         raise ValueError('请确认从原发布回执继续核对')
     if ('retryUkMediaFailures' in data or 'ukMediaEvidence' in data) and (
             data.get('retryUkMediaFailures') is not True or not isinstance(data.get('ukMediaEvidence'), dict)
@@ -796,18 +783,35 @@ def resume(user, data, *, confirmation=None, handoff=None):
     with LOCK:
         job = owned(user, data.get('id'))
         if public(job)['status'] in ('queued', 'running'):
-            if handoff:raise ValueError('原发布任务已在运行，本次观察尚未排队')
             return {**public(job), 'reused': True}
-        if confirmation is not None:
-            if confirmation != _resume_preview(user, job, data)['digest']:
-                raise ValueError('原发布回执已变化，请重新核对')
-            job.setdefault('operatorContinuations', []).append(
-                {'accountId': user, 'at': time.time(), 'digest': confirmation})
         folder = ROOT / job['id']
         continuation_packet = json.loads((folder / 'input.json').read_text(encoding='utf-8'))
         continuation_source = continuation_packet['input']
+        if 'ukCoatWeave' in data:
+            import publication_coat_facts
+            publication_coat_facts.append_uk_weave(user, job, folder, continuation_packet, data['ukCoatWeave'], write_json)
+        if data.get('usCoatFacts'):
+            if app_paths.WORKER_USER and app_paths.WORKER_USER != user:
+                raise ValueError('外套供货资料账号不符')
+            with closing(sqlite3.connect(app_paths.DATA / 'studio.sqlite3')) as db:
+                row = db.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+            product = collection.product_for(json.loads(row[0]) if row else {}, job['productId'])
+            import publication_coat_facts
+            publication_coat_facts.append(user, job, folder, continuation_packet, product, write_json)
+        if data.get('usSkirtFacts'):
+            if app_paths.WORKER_USER and app_paths.WORKER_USER != user:
+                raise ValueError('短裙供货资料账号不符')
+            with closing(sqlite3.connect(app_paths.DATA / 'studio.sqlite3')) as db:
+                row = db.execute('SELECT body FROM workspace WHERE id=1').fetchone()
+            product = collection.product_for(json.loads(row[0]) if row else {}, job['productId'])
+            import publication_skirt_facts
+            publication_skirt_facts.append(user, job, folder, continuation_packet, product, write_json)
+        if 'usSleeveType' in data:
+            _append_us_sleeve_type(user, job, folder, continuation_packet, data['usSleeveType'])
         if 'usPantsRise' in data:
             _append_us_pants_rise(job, folder, continuation_packet, data['usPantsRise'])
+        if 'ukSweatshirtWeave' in data:
+            _append_uk_sweatshirt_weave(user, job, folder, continuation_packet, data['ukSweatshirtWeave'])
         if 'ukPantsWeave' in data:
             evidence = data['ukPantsWeave']
             receipt = json.loads((folder / 'receipt.json').read_text(encoding='utf-8'))
@@ -1131,10 +1135,7 @@ def resume(user, data, *, confirmation=None, handoff=None):
             job.setdefault('amendments', []).append({'id': amendment_id, 'kind': 'uk_category_path', 'path': path.strip(), 'evidence': evidence.strip()})
         job.setdefault('history', []).append({'error': job.pop('error', None), 'resumedAt': time.time()})
         job.update(status='queued', phase=('核对两站最新回执（只读）' if job.get('observationOnly') else '从原发布检查点核对'), runOwner=RUNTIME, ownerPid=os.getpid())
-        if handoff:
-            persist(job,handoff=handoff)
-        else:
-            persist(job)
+        persist(job)
         ACTIVE.add(job['id'])
     threading.Thread(target=execute, args=(job,), daemon=True).start()
     return public(job)
@@ -1158,7 +1159,7 @@ def run_browser(job, connection, phase):
         + ',mediaEpisodeObserveOnly:' + json.dumps(bool(job.get('mediaEpisodeObserveOnly')))
         + ',ukMediaObserveOnly:' + json.dumps(bool(job.get('ukMediaObserveOnly'))) + '});\n', encoding='utf-8')
     browser_timeout = 300 if phase == 'uk_media_recovery' else 1200
-    command = runtime_environment.ego_command(PROJECT) + ['run', str(script),
+    command = [sys.executable, '-X', 'utf8', str(PROJECT / 'automation/ego_browser.py'), 'run', str(script),
                '--timeout', str(browser_timeout), '--binding', connection['browserBinding'], '--application-job']
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -1220,7 +1221,7 @@ def market_dom_click_authorized(job, connection, market):
 
 
 def login(job, connection, market):
-    command = runtime_environment.automation_command('ziniao-plugin',PROJECT) + [
+    command = [sys.executable, '-X', 'utf8', str(PROJECT / 'automation/ziniao_plugin.py'),
                '--store-id', str(connection['storeId']), '--store-name', connection['storeName'],
                '--market', market, '--seller', connection['seller'], '--account', connection['erpAccount'],
                '--ensure-site', '--receipt', str(ROOT / job['id'] / ('login-' + market + '.json'))]

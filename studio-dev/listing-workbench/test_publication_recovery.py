@@ -47,6 +47,20 @@ class PublicationRecoveryTests(unittest.TestCase):
         flow.write_json(folder / 'receipt.json', record)
         return job, packet, record
 
+    def test_exact_us_apparel_quality_advisory_keeps_real_media_failure_scope(self):
+        job, packet, record = self.failed_job()
+        advisory = {'code': '18448', 'severity': 'WARNING', 'attributeNames': ['material', 'pattern', 'special_feature'],
+                    'categories': ['MISSING_ATTRIBUTE', 'PRODUCT'], 'sku': 'P-White-S', 'childId': '2001', 'solution': '',
+                    'message': '您提交的内容缺少一些关键属性：material, pattern, special_feature。 缺少这些属性不会阻止您的商品在亚马逊上展示。 然而，这会影响您的商品信息的整体质量。'}
+        o = record['usPublish']['latestObservation'];o['messages'].append(advisory);o['messageCount'] = 2
+        scope = flow._media_retry_scope(job, record, packet['input'])
+        self.assertEqual(scope['failedChildIds'], ['2001'])
+        for changed in ({'severity': 'ERROR'}, {'attributeNames': ['material']}, {'enforcements': []}, {'categories': None}, {'message': advisory['message'] + ' restricted'}):
+            invalid = copy.deepcopy(record);invalid['usPublish']['latestObservation']['messages'][-1].update(changed)
+            with self.assertRaises(ValueError):flow._media_retry_scope(job, invalid, packet['input'])
+        invalid = copy.deepcopy(record);invalid['usPublish']['latestObservation']['messages'] = [advisory];invalid['usPublish']['latestObservation']['messageCount'] = 1
+        with self.assertRaises(ValueError):flow._media_retry_scope(job, invalid, packet['input'])
+
     def both_linked(self):
         job, packet, record = self.failed_job();source = packet['input']
         prepared = copy.deepcopy(source);prepared['store'] = 'Shop-UK'

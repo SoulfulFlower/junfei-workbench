@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateUkInputs,resolveUkSchema,restoreSkuMapping,makeUkInput,patchUkDraftPayload,verifyUkDraft,prepareUkDraft,migrateAttributes,chooseUkRecommendedCategory,extractSourceIdentifiers,supplementUkRequiredAttributes} from './ego-uk-draft.mjs';
+import {validateUkInputs,resolveUkSchema,restoreSkuMapping,makeUkInput,patchUkDraftPayload,verifyUkDraft,prepareUkDraft,migrateAttributes,chooseUkRecommendedCategory,extractSourceIdentifiers,supplementUkRequiredAttributes,readUkPage,ukCategoryRadioReady,ukCategoryPathVisible} from './ego-uk-draft.mjs';
 import {gbTshirtRecommendations,verifiedUsTshirtPath} from './fixtures/gb-category-recommendations.mjs';
 import {gbShirtListPrice} from './fixtures/gb-shirt-list-price.mjs';
 
@@ -36,6 +36,160 @@ function persistedFrom(body,input){return{code:0,data:{...body,id:200,uid:123,ma
 const targetIdentityAttributes=p=>({brand:[{value:p.goods.brand,language_tag:p.destination.languageTag,marketplace_id:p.destination.marketplaceId}],variation_theme:[{name:p.destination.themeValue}]});
 const mockSchemaValidation=(meta,records)=>({passed:true,checkedCount:records.length,schemaHash:meta.hash,scope:'isolated_test_adapter'});
 
+test('UK category confirmation waits for the actual checked node and then the visible selected path',()=>{
+ const expected={value:'actual-women-jumpers',text:'Fashion Women Clothing Jumpers'};
+ const input={checked:false,value:expected.value};let reactiveChecked=false,visiblePath='Baby Products Baby Clothing Knitwear';
+ const row={innerText:expected.text+'\n套头衫',querySelector:()=>input,classList:{contains:()=>reactiveChecked},getAttribute:()=>reactiveChecked?'true':'false'};
+ const dialog={getBoundingClientRect:()=>({width:800}),querySelectorAll:()=>[row]};
+ const doc={querySelectorAll:()=>[dialog],querySelector:()=>({getBoundingClientRect:()=>({width:740}),get innerText(){return visiblePath;}})};
+ const run=fn=>Function('document','arg','return ('+fn.toString()+')(arg)')(doc,expected);
+ assert.equal(run(ukCategoryRadioReady),false);input.checked=true;assert.equal(run(ukCategoryRadioReady),false);
+ reactiveChecked=true;assert.equal(run(ukCategoryRadioReady),false);assert.equal(run(ukCategoryRadioReady),false);assert.equal(run(ukCategoryRadioReady),true);
+ input.value='first-baby-node';assert.equal(run(ukCategoryRadioReady),false);input.value=expected.value;assert.equal(run(ukCategoryRadioReady),false);
+ assert.equal(run(ukCategoryPathVisible),false);visiblePath='产品分类\nFashion\nWomen\nClothing\nJumpers\n说明';assert.equal(run(ukCategoryPathVisible),true);
+});
+
+test('verified US women Pullovers maps only the actual ordinary GB Jumpers leaf',async()=>{
+ const f=fixture();f.input.categoryHints={path:'Clothing, Shoes & Jewelry > Women > Clothing > Sweaters > Pullovers'};
+ f.input.destination.categoryHints=f.input.categoryHints;f.input.goods.description='Style: Loose crew-neck knitted pullover\nMaterial: 100% acrylic';
+ const record={draftId:'200',sourceEvidence:{country_code:'US',product_type_name:'SWEATER'}};
+ const rows=[{text:'Fashion Women Clothing Jumpers Cardigans & Sweatshirts Jumpers',value:'real-ordinary'},
+  {text:'Fashion Women Clothing Jumpers Cardigans & Sweatshirts Sleeveless Jumpers',value:'sleeveless'},
+  {text:'Fashion Women Clothing Maternity Knitwear Jumpers',value:'maternity'},
+  {text:'Fashion Men Clothing Jumpers Cardigans & Sweatshirts Jumpers',value:'mens'}];
+ assert.equal((await chooseUkRecommendedCategory(rows,f.input,record,async()=>{})).value,'real-ordinary');
+ assert.equal(record.categoryMapping.source,'verified_us_pullover_to_observed_uk_jumpers');
+ assert.equal(record.categoryMapping.humanReviewed,false);
+ assert.equal(f.input.categoryHints.path,'Clothing, Shoes & Jewelry > Women > Clothing > Sweaters > Pullovers');
+ await assert.rejects(chooseUkRecommendedCategory(rows.slice(1),f.input,record,async()=>{}),/节点缺失或有歧义/);
+ await assert.rejects(chooseUkRecommendedCategory([...rows,rows[0]],f.input,record,async()=>{}),/节点缺失或有歧义/);
+ record.sourceEvidence.product_type_name='SHIRT';
+ await assert.rejects(chooseUkRecommendedCategory(rows,f.input,record,async()=>{}),/类目推荐有歧义/);
+});
+
+test('source-bound acrylic jacquard pullover fills real GB SWEATER fields without inventing supplier weave certification',()=>{
+ const f=fixture();f.meta.product_type_name='SWEATER';
+ f.input.goods.title="Women's Fair Isle Jacquard Pullover Sweater";
+ f.input.goods.description='Style: Loose crew-neck knitted pullover\nMaterial: 100% acrylic';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123456.html';
+ f.input.publicationFacts={supplierModelNumber:'AC123',supplierModelNumberEvidence:{source:'supplier_attribute',value:'AC123',sourceUrl:f.input.goods.sourceUrl},waterResistanceLevel:'not_water_resistant',waterResistanceLevelSource:{basis:{classification:'ordinary_apparel'}}};
+ const props=f.meta.schema_content.properties,value=choices=>({items:{properties:{value:{type:'string',...(choices?{enum:choices}:{})},language_tag:{},marketplace_id:{}}}});
+ props.item_type_name=value(['Pullover Sweater']);props.manufacturer=value();props.water_resistance_level=value(['not_water_resistant']);
+ props.weave_type=value(['Jacquard','Plain']);props.outer={items:{properties:{material:{items:{properties:{value:{type:'string'},language_tag:{}}}},marketplace_id:{}}}};
+ const original=structuredClone(f.input),r=supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{});
+ assert.equal(r.attributes.item_type_name[0].value,'Pullover Sweater');assert.equal(r.attributes.manufacturer[0].value,'Maker');
+ assert.equal(r.attributes.outer[0].material[0].value,'100% acrylic');assert.equal(r.attributes.water_resistance_level[0].value,'not_water_resistant');
+ assert.equal(r.attributes.weave_type[0].value,'Jacquard');assert.equal(r.evidence.weave_type.source,'inferred_workbench_classification');assert.equal(r.evidence.weave_type.supplierVerified,false);
+ assert.deepEqual(f.input,original);
+ for(const change of [x=>x.goods.description=x.goods.description.replace('100% acrylic','Acrylic blend'),x=>x.goods.title='Plain Pullover Sweater',x=>x.publicationFacts.supplierModelNumberEvidence.sourceUrl='https://detail.1688.com/offer/999.html',x=>x.publicationFacts.weaveTypeEvidence={value:'Woven'}]){
+  const input=structuredClone(original);change(input);assert.equal(supplementUkRequiredAttributes({},input,f.meta,f.prepared,{}).attributes.weave_type,undefined);
+ }
+ props.weave_type=value(['Plain']);assert.throws(()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}),/Jacquard选项/);
+});
+
+test('source-bound ribbed cowl SWEATER fills actual GB Rib and Synthetic choices with honest inferred evidence',()=>{
+ const f=fixture();f.meta.product_type_name='SWEATER';
+ f.input.goods.title='Cowl Neck Tops for Women, Ribbed Knit Long Sleeve Pullover Shirt';
+ f.input.goods.description='Material: 95% polyester, 5% spandex\nNeckline: Deep draped cowl\nTexture: Fine vertical ribbing\nFit: Loose pullover shape';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123456.html';
+ f.input.publicationFacts={supplierModelNumber:'CW123',supplierModelNumberEvidence:{source:'supplier_attribute',value:'CW123',sourceUrl:f.input.goods.sourceUrl},waterResistanceLevel:'not_water_resistant',waterResistanceLevelSource:{basis:{classification:'ordinary_apparel'}}};
+ const p=f.meta.schema_content.properties,value=choices=>({items:{properties:{value:{type:'string',...(choices?{enum:choices}:{})},language_tag:{},marketplace_id:{}}}});
+ p.item_type_name=value(['Pullover Sweater']);p.manufacturer=value();p.water_resistance_level=value(['not_water_resistant']);p.weave_type=value(['Rib','Plain']);
+ p.outer={items:{properties:{material:{items:{properties:{value:{type:'string',enum:['Synthetic','Cotton']},language_tag:{}}}},marketplace_id:{}}}};
+ const original=structuredClone(f.input),r=supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{});
+ assert.equal(r.attributes.weave_type[0].value,'Rib');assert.equal(r.attributes.outer[0].material[0].value,'Synthetic');assert.equal(r.attributes.item_type_name[0].value,'Pullover Sweater');
+ assert.equal(r.evidence.weave_type.source,'inferred_workbench_classification');assert.equal(r.evidence.weave_type.supplierVerified,false);assert.deepEqual(f.input,original);
+ for(const change of [x=>x.goods.description+='\nFit: Fitted',x=>x.goods.description=x.goods.description.replace('95%','85%'),x=>x.goods.description=x.goods.description.replace('Fine vertical ribbing','Woven'),x=>x.publicationFacts.supplierModelNumberEvidence.sourceUrl='foreign',x=>x.publicationFacts.weaveTypeEvidence={value:'Woven'},x=>x.publicationFacts.waterResistanceLevelSource.basis.classification='protective_apparel']){
+  const input=structuredClone(original);change(input);assert.equal(supplementUkRequiredAttributes({},input,f.meta,f.prepared,{}).attributes.weave_type,undefined);
+ }
+ p.weave_type=value(['Plain']);assert.throws(()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}),/Rib选项/);
+ p.weave_type=value(['Rib']);p.outer.items.properties.material.items.properties.value.enum=['Cotton'];assert.throws(()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}),/Synthetic选项/);
+});
+
+test('GB SKIRT preserves explicit gender when its schema omits the US Womens department',()=>{
+ const f=fixture();f.meta.product_type_name='SKIRT';
+ f.meta.schema_content.properties.target_gender={items:{properties:{value:{enum:['female','male']},language_tag:{type:'string'},marketplace_id:{type:'string'}}}};
+ const attrs={department:[{value:'Womens'}],target_gender:[{value:'female',marketplace_id:'USMARKET'}]};
+ const migrated=migrateAttributes(attrs,f.meta,f.input.destination,f.prepared.destination);
+ assert.equal(migrated.department,undefined);assert.equal(migrated.target_gender[0].value,'female');
+ assert.equal(migrated.target_gender[0].marketplace_id,'UKMARKET');
+ attrs.department[0].value='Mens';assert.throws(()=>migrateAttributes(attrs,f.meta,f.input.destination,f.prepared.destination),/不支持原商品属性 department/);
+ attrs.department[0].value='Womens';f.meta.product_type_name='COAT';
+ assert.throws(()=>migrateAttributes(attrs,f.meta,f.input.destination,f.prepared.destination),/不支持原商品属性 department/);
+});
+
+test('UK skirt fills its actual category and composition while rejecting foreign product weave defaults',()=>{
+ const f=fixture();f.meta.product_type_name='SKIRT';
+ f.input.goods.description='Material: 95% polyester, 5% elastane\nStyle: Fitted mini skirt with short off-center front slit';
+ f.prepared.destination.categoryHints={path:'Fashion > Women > Clothing > Skirts'};
+ const setting={value:'Plain',source:'user_configured_defaults',productId:f.input.productId,scope:'missing_catalogue_attribute_only',supplierVerified:false,configuredAt:'2026-11-21T18:00:00+08:00',instruction:'Isolated seller setting'};
+ f.input.publicationFacts={weaveTypeEvidence:setting};const p=f.meta.schema_content.properties;
+ const value=choices=>({items:{properties:{value:{enum:choices}}}});
+ p.item_type_name=value(['Skirt','Skort']);p.weave_type=value(['Plain','Satin']);p.manufacturer=value([]);
+ p.outer={items:{properties:{material:{items:{properties:{value:{type:'string'},language_tag:{type:'string'}}}}}}};
+ let r=supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{});
+ assert.equal(r.attributes.item_type_name[0].value,'Skirt');assert.equal(r.attributes.weave_type[0].value,'Plain');
+ assert.equal(r.attributes.outer[0].material[0].value,'95% polyester, 5% elastane');
+ assert.equal(r.attributes.outer[0].material[0].marketplace_id,undefined);assert.equal(r.evidence.weave_type.supplierVerified,false);
+ f.prepared.destination.categoryHints.path='Fashion Women Clothing Skirts';
+ p.inner={items:{required:['material'],properties:{marketplace_id:{type:'string'},material:{items:{properties:{value:{type:'string',maxLength:500}}}}}}};
+ r=supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{});
+ assert.equal(r.attributes.item_type_name[0].value,'Skirt');assert.equal(r.attributes.inner[0].material[0].value,'Base fabric: 95% polyester, 5% elastane; separate lining not specified');
+ assert.equal(r.evidence.inner.separateLiningVerified,false);
+ p.inner.items.properties.material.items.properties.value.enum=['Cotton'];assert.equal(supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}).attributes.inner,undefined);
+ setting.productId='Other';assert.equal(supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}).attributes.weave_type,undefined);
+ setting.productId=f.input.productId;
+ r=supplementUkRequiredAttributes({weave_type:[{value:'Satin'}]},f.input,f.meta,f.prepared,{});assert.equal(r.attributes.weave_type[0].value,'Satin');
+ f.prepared.destination.categoryHints.path='Fashion > Women > Clothing > Trousers';
+ assert.equal(supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,{}).attributes.item_type_name,undefined);
+});
+
+test('UK pants consume an explicit product-bound seller weave setting without claiming supplier verification',()=>{
+ const f=fixture();f.meta.product_type_name='PANTS';
+ f.input.goods.description='Material: 95% Polyester, 5% Elastane\nStyle: Western wide-leg full-length trousers';
+ f.prepared.destination.categoryHints={path:'Fashion > Women > Clothing > Trousers'};
+ const setting={value:'Plain',source:'user_configured_defaults',productId:f.input.productId,
+  scope:'missing_catalogue_attribute_only',supplierVerified:false,configuredAt:'2026-11-21T15:00:00+08:00',instruction:'Isolated seller test setting'};
+ f.input.publicationFacts={waterResistanceLevel:'not_water_resistant',weaveTypeEvidence:setting};
+ const p=f.meta.schema_content.properties;
+ const value=choices=>({items:{properties:{value:{enum:choices}}}});
+ p.item_type_name=value(['Pants']);p.weave_type=value(['Plain','Satin']);p.water_resistance_level=value(['not_water_resistant']);
+ p.fit_type=value(['Loose','Flowy']);
+ p.leg={items:{properties:{style:value(['Wide'])}}};
+ const before=structuredClone(f.input);
+ const read=()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared);
+ assert.equal(read().attributes.weave_type[0].value,'Plain');assert.deepEqual(read().evidence.weave_type,setting);
+ assert.equal(read().attributes.fit_type[0].value,'Loose');
+ assert.equal(read().evidence.fit_type.source,'inferred_workbench_classification');
+ assert.equal(read().evidence.fit_type.humanReviewed,false);
+ const explicitFit=[{value:'Regular',language_tag:'en_GB',marketplace_id:'UKMARKET'}];
+ assert.deepEqual(supplementUkRequiredAttributes({fit_type:explicitFit},f.input,f.meta,f.prepared).attributes.fit_type,explicitFit);
+ assert.deepEqual(f.input,before);
+ for(const [key,v] of [['productId','other'],['source','agent_guess'],['supplierVerified',true],['instruction','']]){
+  f.input.publicationFacts.weaveTypeEvidence={...setting,[key]:v};assert.equal(read().attributes.weave_type,undefined);
+ }
+ f.input.publicationFacts.weaveTypeEvidence=setting;p.weave_type=value(['Satin']);assert.throws(read,/已核实的属性值/);
+});
+
+test('UK shipping readback uses the unique visible label when the native placeholder changes',async()=>{
+ const current='input[data-studio-uk-shipping="true"]';
+ let marked=false;
+ const visible={getBoundingClientRect:()=>({width:100})};
+ const shipping={...visible,placeholder:'Migrated Template',value:'UK Tracked',
+  closest:()=>({__vue__:{value:'uk-template'}}),setAttribute:(name,value)=>{assert.equal(name,'data-studio-uk-shipping');assert.equal(value,'true');marked=true;}};
+ const label={...visible,innerText:'配送模板',closest:()=>({querySelectorAll:()=>[shipping]})};
+ const row={querySelector:()=>({}),innerText:'GBP'};
+ const context={location:{href:'https://www.junfeikuajing.com/#/amazon/product/200?type=draft'},
+  getComputedStyle:()=>({visibility:'visible'}),document:{querySelectorAll:selector=>selector.startsWith('label')?[label]:[row],
+   querySelector:selector=>selector===current&&marked?shipping:selector.includes('亚马逊运输模板')?null:{value:'Other',closest:()=>({innerText:''})}}};
+ const execute=(func,arg)=>Function('document','location','getComputedStyle','arg','return ('+func+')(arg)')
+  (context.document,context.location,context.getComputedStyle,arg);
+ const page={evaluate:async(func,arg)=>execute(func,arg),waitForFunction:async(func,arg)=>assert.ok(execute(func,arg))};
+ const result=await readUkPage(page);
+ assert.equal(result.shippingTemplate,'UK Tracked');assert.equal(result.shippingTemplateId,'uk-template');
+ assert.deepEqual(result.currencies,[['GBP']]);
+});
+
 function materialFixture(){
  const f=fixture(),localized=value=>({type:'array',items:{type:'object',required:['language_tag','value'],properties:{value,
   language_tag:{type:'string'},marketplace_id:{$ref:'#/$defs/marketplace_id'}}}});
@@ -47,6 +201,40 @@ function materialFixture(){
  return f;
 }
 
+test('UK half-zip sweatshirt uses known facts and reserves weave for the exact confirmed source',()=>{
+ const f=materialFixture();
+ f.input.goods.description='Style: regular-cut half-zip pullover\nMaterial: 95% polyester, 5% spandex';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123.html';
+ f.meta.schema_content.properties.weave_type={items:{properties:{value:{anyOf:[{type:'string'},{enum:['Cable']}]}}}};
+ const read=()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared);
+ assert.equal(read().attributes.item_type_name[0].value,'Sweatshirt');
+ assert.equal(read().attributes.outer[0].material[0].value,'95% polyester, 5% spandex');
+ assert.equal(read().attributes.weave_type,undefined);
+ f.input.ukPreparation={sweatshirtWeave:{productId:'Product',sourceUrl:f.input.goods.sourceUrl,value:'Knit',source:'user_confirmation'}};
+ assert.equal(read().attributes.weave_type[0].value,'Knit');
+ f.input.ukPreparation.sweatshirtWeave.sourceUrl+='?different';
+ assert.equal(read().attributes.weave_type,undefined);
+});
+
+test('UK hooded half-zip takes the woven value from the same frozen supplier',()=>{
+ const f=materialFixture();
+ f.input.goods.description='Style: Relaxed-fit hooded pullover\nMaterial: 95% polyester, 5% elastane\nClosure: Half zip\nHood: Drawstring';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123.html';
+ f.meta.schema_content.properties.weave_type={items:{properties:{value:{enum:['Woven','Knit']}}}};
+ const weave={source:'supplier_attribute',sourceUrl:f.input.goods.sourceUrl,field:'工艺',sourceValue:'梭织',value:'Woven'};
+ f.input.publicationFacts={weaveTypeEvidence:weave};
+ const read=()=>supplementUkRequiredAttributes({fabric_type:[{value:'95% polyester, 5% elastane'}]},f.input,f.meta,f.prepared);
+ const result=read();
+ assert.equal(result.attributes.weave_type[0].value,'Woven');
+ assert.equal(result.attributes.item_type_name[0].value,'Sweatshirt');
+ assert.equal(result.attributes.material[0].value,'Polyester Blend');
+ assert.deepEqual(result.evidence.weave_type,weave);
+ f.input.publicationFacts.weaveTypeEvidence={...weave,value:'Knit'};
+ assert.equal(read().attributes.weave_type,undefined);
+ f.input.publicationFacts.weaveTypeEvidence={...weave,sourceUrl:'https://detail.1688.com/offer/321.html'};
+ assert.equal(read().attributes.weave_type,undefined);
+});
+
 test('UK material requires unique native enum matches and complete unambiguous fabric proportions',()=>{
  const f=materialFixture(),project=(value,attributes={})=>supplementUkRequiredAttributes({fabric_type:[{value}],...attributes},f.input,f.meta,f.prepared);
  for(const sourceValue of ['Polyester',' polyester ','100% Polyester']){
@@ -54,14 +242,14 @@ test('UK material requires unique native enum matches and complete unambiguous f
   assert.deepEqual(attributes.material,[{value:'Polyester',language_tag:'en_GB',marketplace_id:'UKMARKET'}]);
   assert.equal(evidence.material.sourceValue,sourceValue);
  }
- for(const sourceValue of ['95% Polyester, 5% Spandex','75.01% Polyester / 24.99% Cotton']){
+ for(const sourceValue of ['95% Polyester, 5% Spandex','95% Polyester, 5% Elastane','75.01% Polyester / 24.99% Cotton']){
   const {attributes,evidence}=project(sourceValue);
   assert.equal(attributes.material[0].value,'Polyester Blend');
   assert.equal(evidence.material.transformation,'majority_fiber_blend_enum');
   assert.equal(evidence.material.primaryFiber,'Polyester');
   assert.equal(evidence.material.sourceValue,sourceValue);
  }
- for(const value of ['Polyester Blend','90% Polyester','95% Polyester, 5% Elastane','95% Polyester, 5% polyester',
+ for(const value of ['Polyester Blend','90% Polyester','94% Polyester, 5% Elastane, 1% Spandex','95% Polyester, 5% polyester',
   '95% Polyester, 6% Spandex','100% Polyester, 0% Spandex','50% Polyester, 50% Cotton','40% Polyester, 30% Cotton, 30% Spandex',
   '95% Cotton, 5% Spandex','Unknown']){
   const result=project(value);assert.equal(result.attributes.material,undefined,value);assert.equal(result.evidence.material,undefined,value);
@@ -95,7 +283,8 @@ test('fresh UK Save preserves fabric composition and writes localized material w
  assert.deepEqual(saved.attributes.material,localize('Polyester'));
  assert.deepEqual(first.attributes.material,localize('Polyester Blend'));
  assert.deepEqual(first.attributes.fabric_type,localize('95% Polyester, 5% Spandex'));
- assert.equal(second.attributes.material,undefined);
+ assert.deepEqual(second.attributes.material,localize('Polyester Blend'));
+ assert.deepEqual(second.attributes.fabric_type,localize('95% Polyester, 5% Elastane'));
  assert.equal(record.requiredAttributeEvidence.Parent.material.sourceValue,'100% Polyester');
  assert.equal(record.requiredAttributeEvidence[first.sku].material.primaryPercentage,95);
  assert.doesNotMatch(JSON.stringify(saved),/original_migrated_fabric_type|majority_fiber_blend_enum/);
@@ -104,7 +293,7 @@ test('fresh UK Save preserves fabric composition and writes localized material w
  assert.equal(record.materialReadback.bySku.Parent.status,'matched');
  assert.deepEqual(record.materialReadback.bySku[first.sku],{status:'matched',expectedValue:'Polyester Blend',
   observed:[{value:'Polyester Blend',languageTag:'en_GB',marketplaceId:'UKMARKET'}]});
- assert.equal(record.materialReadback.bySku[second.sku],undefined);
+ assert.deepEqual(record.materialReadback.bySku[second.sku],record.materialReadback.bySku[first.sku]);
  const missingOnReadback=persistedFrom(structuredClone(saved));
  delete missingOnReadback.data.items.find(row=>row.sku===first.sku).extra.attributes.material;
  let resumedSaves=0;

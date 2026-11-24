@@ -71,6 +71,19 @@ def configure(data,product):
     context=local_colour_sources.context(product)
     recipe={**parameters(data),'productId':product['id'],'masterId':context['id'],'colorKey':group['key'],'reference':data['reference'],
             'source':'user_confirmed_local_colour','pipeline':AUTOMATIC_PIPELINE,'manualTuning':True,'updated':time.time()}
+    evidence=data.get('referenceSample')
+    if evidence is not None:
+        if not isinstance(evidence,dict) or data.get('reviewerType')!='agent':
+            raise ValueError('参考图取色须记录智能体来源及原始样本')
+        main=automatic_reference.main_reference(group,data['reference'])
+        if main['url']!=data['reference']:raise ValueError('取色样本必须绑定该颜色真实变体主图')
+        from colour_reference import sample
+        verified=sample(data['reference'],evidence.get('box'))
+        if (evidence.get('reference')!=data['reference'] or evidence.get('sourceSha256')!=verified['sourceSha256']
+                or evidence.get('target')!=verified['target'] or data['target']!=verified['target']):
+            raise ValueError('参考图、样本哈希或取色结果已变化，请重新核对')
+        recipe.update(source='agent_verified_reference_patch',sourceSha256=verified['sourceSha256'],
+                      referenceSourceAsin=main['sourceAsin'],referencePatch=verified,reviewerType='agent',humanReviewed=False)
     return store_recipe(recipe,product,context,group,data['reference'])
 
 
@@ -182,9 +195,8 @@ def _plans(product,data=None):
             except ValueError as error:issues.append(str(error))
             if previous and (previous['status'] in BUSY or previous['id'] in colours.IN_FLIGHT):issues.append('当前颜色已有任务执行中，请等待完成')
             if previous and any(i['status'] in ('submitting','submit_unknown','generating','queued') for i in previous['items']):issues.append('存在尚未核对的API任务，本地入口不会重提或覆盖')
-        missing=[slot for slot in pending if not selections[slot]]
-        stale_selection=any(selections[slot] and not selections[slot].get('preserveWholeImage') and
-            (selections[slot].get('automaticSelection') or {}).get('version')!=automatic_reference.garment_auto.VERSION for slot in pending)
+        missing=[slot for slot in pending if not sources[slot].get('sharedSizeChart') and not selections[slot]]
+        stale_selection=any(pixel.selection_needs_refresh(selections[slot]) for slot in pending if not sources[slot].get('sharedSizeChart'))
         plans.append({'colorKey':key,'color':group['color'],'reference':reference,'previous':previous,'complete':complete,'pendingSlots':pending,'missingSlots':missing,'recipe':recipe,
             'automaticPreparationRequired':not complete and (bool(missing) or stale_selection or not _current_automatic_recipe(recipe)),'issues':issues})
     if data.get('colorKey') and not plans:raise ValueError('请选择当前产品的目标颜色，不能对母版颜色重复换色')
@@ -219,6 +231,7 @@ def _start(data,product,all_colors=False):
         for plan in preflight:
             if not plan['complete']:_automatic_recipe(product,context,groups[plan['colorKey']],plan['reference'],plan['previous'])
         pending={slot for plan in preflight if not plan['complete'] for slot in plan['pendingSlots']}
+        pending={slot for slot in pending if not sources[slot].get('sharedSizeChart')}
         if pending:pixel.ensure_automatic_selections(product,sorted(pending),refresh_legacy=True)
     with LOCK,colours.LOCK:
         context,sources,selections,plans=_plans(product,{} if all_colors else data)
@@ -255,7 +268,7 @@ def _start(data,product,all_colors=False):
                 item.pop('jobId',None);item.pop('error',None)
                 # Bind each original/selection revision now, not when a worker
                 # happens to run after someone has edited the masks.
-                item['localInput']={'source':sources[item['slot']],'selectionRevision':selections[item['slot']]['revision']}
+                item['localInput']={'source':sources[item['slot']],'selectionRevision':selections[item['slot']]['revision'] if selections[item['slot']] and not sources[item['slot']].get('sharedSizeChart') else None}
             s.update(model='local-pixel',status='local_preparing',localTask={'id':job,'recipe':parameters(plan['recipe']),'pendingSlots':plan['pendingSlots'],'created':time.time(),'imageApiSubmissionAllowed':False})
             s['localTask']['colourSource']={k:plan['recipe'].get(k) for k in ('source','reference','sourceSha256','referenceSourceAsin','automaticReferenceVersion','selectionVersion','pipeline','manualTuning')}
             s.pop('error',None);staged.append(s)
@@ -300,7 +313,10 @@ def _work(s,product):
             current['status']='local_rendering';item['status']='local_rendering';colours.save(current)
             source=item['localInput']['source'];revision=item['localInput']['selectionRevision']
         try:
-            receipt=pixel.render({**source,'revision':revision,**task['recipe']},product)
+            if source.get('sharedSizeChart'):
+                from shared_size_chart import reuse_receipt
+                receipt=reuse_receipt(source,pixel.image_provider.local_image)
+            else:receipt=pixel.render({**source,'revision':revision,**task['recipe']},product)
             # No image submission, safety-refusal replay, or provider-model
             # choice occurs in this branch. Native QA consumes only the result.
             with colours.LOCK:
@@ -308,7 +324,7 @@ def _work(s,product):
                 if current.get('localTask',{}).get('id')!=identity:return
                 item=next(i for i in current['items'] if i['slot']==slot)
                 item.update(image=receipt['image'],sourceUpload=source['source'],status='local_ready',
-                    localCorrection={'method':'local_gallery_recolour','sha256':receipt['sha256'],'pixelRecipe':receipt,'humanReviewed':False,'time':time.time()})
+                    localCorrection={'method':'shared_size_chart_reuse' if source.get('sharedSizeChart') else 'local_gallery_recolour','sha256':receipt['sha256'],'pixelRecipe':receipt,'humanReviewed':False,'time':time.time()})
                 item['sourceSha256']=hashlib.sha256(pixel.image_provider.local_image(source['source'])).hexdigest()
                 colours.save(current)
                 if current['status']=='local_paused':return

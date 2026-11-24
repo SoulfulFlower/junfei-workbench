@@ -86,7 +86,7 @@ def audit(args):
     skus=[v.get('sku') for v in children]
     if (not skus or len(skus)>100 or len(set(skus))!=len(skus)
             or any(not isinstance(s,str) or not s.startswith(args.parent_sku+'-')
-                   or not re.fullmatch(r'[A-Za-z0-9_-]+',s) for s in skus)):
+                   or not re.fullmatch(r'[A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*',s) for s in skus)):
         raise ValueError('原子SKU集合缺失、重复、超范围或不支持')
     origin,country=MARKETS[args.market]
     # Before any navigation, verify this exact native target's visible market.

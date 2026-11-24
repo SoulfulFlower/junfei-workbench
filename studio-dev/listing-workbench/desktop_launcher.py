@@ -1,4 +1,5 @@
 """Desktop entry point, with a private worker entry for isolated accounts."""
+import json
 import os
 import sys
 import threading
@@ -42,6 +43,11 @@ if ready():
     if PORTABLE:
         print('Port already in use; portable app will not reuse an unidentified instance', flush=True)
         raise SystemExit(2)
+    if os.environ.get('JUNFEI_LOCAL_MODE') == '1':
+        with urlopen(URL + '/api/auth/status', timeout=2) as response:
+            if not json.load(response).get('localMode'):
+                print('Port already in use by a workbench in team mode.', flush=True)
+                raise SystemExit(2)
     if OPEN_BROWSER: webbrowser.open(URL)
     raise SystemExit(0)
 

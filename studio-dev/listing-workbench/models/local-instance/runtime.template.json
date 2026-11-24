@@ -1,0 +1,15 @@
+{
+  "schema": "junfei.sam2.local.runtime.v1",
+  "modelName": "facebook/sam2.1-hiera-large",
+  "revision": "665f8e2ad61cf5f53d65644ff27c8ee525124610",
+  "weightSha256": "dc407dce21301fd94abb395c5099b4f2c455fdc8a8f261ac3d0ea6d4cd197230",
+  "workerFile": "sam2_local_worker.py",
+  "workerSha256": "ff7a37a085e020ab19d4fc821d79f6650012568ca26a4953cc284c3236b9bb6b",
+  "modelManifestFile": "model-manifest.json",
+  "modelSha256": "96036f3b70651c5bf0892e92149409caacf6c5f5ea6521a8bfe85b32390bd303",
+  "dependencyManifestFile": "dependencies.json",
+  "dependenciesSha256": "288c811955cf01e49ad1a57ab143668a7be9116d08f9c3da746d67b705d10ceb",
+  "pythonExecutable": "",
+  "pythonSha256": "",
+  "inferenceContract": "native_multimask_all_points_v1"
+}

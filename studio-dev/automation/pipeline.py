@@ -11,9 +11,6 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import date, datetime, timezone
 from pathlib import Path
-
-from codex_workbench import call as workbench_call
-from pipeline_delivery import artifact_records, original_delivery
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -279,61 +276,6 @@ def read_json(path):
     return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
-def published_children(record, row):
-    pub = record.get('publication')
-    store = json.loads(row['config'])['publishing']['store']
-    if (not isinstance(pub, dict) or pub.get('marketplace') != row['market'] or pub.get('store') != store
-            or not isinstance(pub.get('publish_id'), str) or not pub['publish_id'].strip()
-            or not isinstance(record.get('external_ids'), list) or pub['publish_id'] not in record['external_ids']):
-        raise ValueError('发布回执须匹配本任务的店铺、站点及外部发布编号')
-    skus = pub.get('child_skus')
-    if (not isinstance(skus,list) or not skus or not all(isinstance(s,str) and s and s==s.strip() for s in skus)
-            or len(set(skus))!=len(skus)):
-        raise ValueError('发布回执须记录完整且唯一的子 SKU')
-    return pub
-
-
-def workbench_receipt(db, row, evidence):
-    from urllib.parse import urlencode
-    events = db.execute("SELECT data,created_at FROM events WHERE job_id=? AND stage='publish' AND action='completed' LIMIT 2",
-                        (row['id'],)).fetchall()
-    if len(events) != 1:
-        raise ValueError('缺少唯一原发布回执')
-    record = json.loads(events[0]['data'])
-    pub = published_children(record, row)
-    reference = evidence.get('workbench_publication_id') or record.get('workbench_publication_id')
-    if (not isinstance(reference, str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,100}', reference)
-            or record.get('workbench_publication_id', reference) != reference
-            or not isinstance(evidence.get('external_ids'), list) or pub['publish_id'] not in evidence['external_ids']):
-        raise ValueError('在售核验须引用原工作台发布任务和 ERP 发布编号')
-    query = urlencode({'jobId': reference, 'publishId': pub['publish_id'],
-                       'sourceId': row['source_id'], 'pipelineJobId': row['id']})
-    url = json.loads(row['config'])['execution'].get('workbench_url', 'http://127.0.0.1:18765')
-    if not isinstance(url, str) or not url.strip():
-        raise ValueError('任务配置缺少有效的工作台地址')
-    receipt = workbench_call('publication-receipt?' + query, workbench_url=url)
-    expected = {k: pub[k] for k in ('publish_id', 'marketplace', 'store')}
-    expected['workbench_publication_id'] = reference
-    if record.get('delivery_scope'):
-        expected['parent_sku'] = record['delivery_scope']['parent_sku']
-    if not isinstance(receipt, dict) or any(receipt.get(k) != v for k, v in expected.items()):
-        raise ValueError('工作台 ERP 回执与原发布号、店铺或站点不同')
-    children = receipt.get('children')
-    if (not isinstance(children, list) or len(children) != len(pub['child_skus'])
-            or any(not isinstance(child, dict) or not isinstance(child.get('sku'), str)
-                   or child.get('status') not in ('online', 'active', 'buyable', 'discoverable')
-                   or not re.fullmatch(r'[A-Z0-9]{10}', str(child.get('asin') or '')) for child in children)
-            or {child['sku'] for child in children} != set(pub['child_skus'])):
-        raise ValueError('工作台 ERP 回执须证明全部原子 SKU 在售且有 ASIN')
-    try:
-        observed = datetime.fromisoformat(receipt['observed_at'].replace('Z', '+00:00'))
-        if not datetime.fromisoformat(events[0]['created_at']) <= observed <= datetime.now(timezone.utc):
-            raise ValueError
-    except (AttributeError, KeyError, TypeError, ValueError):
-        raise ValueError('请到工作台只读刷新原发布任务，再完成在售核验') from None
-    return receipt
-
-
 def doctor(config, root=ROOT):
     problems = []
     for field in ('platform', 'store', 'quantity', 'shipping_template'):
@@ -462,14 +404,6 @@ class Pipeline:
                 issues = doctor(cfg)
                 if issues:
                     raise ValueError('; '.join(issues))
-                exported = original_delivery(self.db, job, 'export')
-                hashes = exported.get('artifact_sha256') or {}
-                if len(hashes) != 1:
-                    raise ValueError('发布前须有唯一经校验的交付 ZIP')
-                path, expected = next(iter(hashes.items()))
-                with Path(path).open('rb') as stream:
-                    if hashlib.file_digest(stream, 'sha256').hexdigest() != expected:
-                        raise ValueError('原交付 ZIP 已变化，先按原任务核对文件')
             token = uuid.uuid4().hex
             self.db.execute("UPDATE jobs SET status='running',token=?,attempts=attempts+1,updated_at=? WHERE id=?", (token, now(), job))
             self.event(job, stage, 'claimed', {'token': token})
@@ -478,18 +412,9 @@ class Pipeline:
                     'required_checks': CHECKS[stage], 'config': cfg}
 
     def finish(self, job, token, evidence):
-        if not isinstance(evidence, dict):
-            raise ValueError('阶段证据须为对象')
-        receipt = None
-        initial = self.get(job)
-        if (initial['stage'] == STAGES.index('verify') and initial['token'] == token and token
-                and initial['status'] in ('running', 'blocked', 'uncertain')
-                and evidence.get('job_id') == job and evidence.get('stage') == 'verify'
-                and evidence.get('simulated') is False):
-            receipt = workbench_receipt(self.db, initial, evidence)
         with self.transaction():
             row = self.get(job)
-            if row['status'] not in ('running', 'blocked', 'uncertain') or not token or row['token'] != token:
+            if row['status'] not in ('running', 'uncertain') or row['token'] != token:
                 raise ValueError('任务状态或领取token不匹配，拒绝重复完成')
             stage = STAGES[row['stage']]
             if evidence.get('stage') != stage or evidence.get('job_id') != job:
@@ -515,31 +440,20 @@ class Pipeline:
                     raise ValueError('本产品生图费用已超预算，图片阶段阻断，需先调整预算或替换素材')
                 if not costs or any(cost['state'] == 'reserved' for cost in costs) or not any(cost['state'] == 'settled' for cost in costs):
                     raise ValueError('图片阶段必须先结算已确认的生图费用，或对确认无费用的调用结算为¥0')
-            if not isinstance(files, list) or any(not isinstance(item, str) for item in files):
-                raise ValueError('产物必须是绝对路径清单')
-            paths = [Path(item) for item in files]
-            if any(not path.is_absolute() or not path.is_file() for path in paths) or len(set(paths)) != len(paths):
-                raise ValueError('产物必须是存在且唯一的绝对文件路径')
-            validated = artifact_records(self.db, row, stage, evidence, paths)
             hashes = {}
-            for path in paths:
-                with path.open('rb') as stream:
-                    hashes[str(path)] = hashlib.file_digest(stream, 'sha256').hexdigest()
-            if stage == 'publish':
-                publication = published_children(evidence, row)
-                exported = validated['delivery_scope']
-                if set(publication['child_skus']) != {item['sku'] for item in exported['variants']}:
-                    raise ValueError('发布回执的子 SKU 与已完成导出的冻结范围不符')
-            elif stage == 'verify':
-                if receipt is None:
-                    raise ValueError('缺少工作台 ERP 原回执')
-                validated['online_observation'] = receipt
+            for item in files:
+                path = Path(item)
+                if not path.is_absolute() or not path.is_file():
+                    raise ValueError('产物必须是存在的绝对文件路径')
+                hashes[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+            if stage in ('publish', 'verify') and not evidence.get('external_ids'):
+                raise ValueError('必须记录外部SKU/任务号及实际状态')
             reservation = None
             if stage == 'selection':
                 reservation = reserve_selected_candidate(ledger_path, row['market'], row['source_id'], job,
                     evidence['selection_evidence']['dedupe']['ledger_sha256'])
             next_stage = row['stage'] + 1
-            event_data = {**evidence, **validated, 'artifact_sha256': hashes}
+            event_data = dict(evidence, artifact_sha256=hashes)
             if reservation: event_data['selection_reservation'] = reservation
             self.event(job, stage, 'completed', event_data)
             status = 'done' if next_stage == len(STAGES) else 'ready'
@@ -622,6 +536,18 @@ class Pipeline:
                 'reservations':[{'id':r['id'],'job_id':r['job_id'],'day':r['day'],'reserved_rmb':f"{r['reserved_fen']/100:.2f}",'actual_rmb':None if r['actual_fen'] is None else f"{r['actual_fen']/100:.2f}",'state':r['state'],'external_id':r['external_id']} for r in rows],
                 'products':{job:{'limit_rmb':f"{v['limit_fen']/100:.2f}",'used_and_reserved_rmb':f"{(v['reserved_fen']+v['actual_fen'])/100:.2f}"} for job,v in products.items()}}
 
+    def block_ready(self, job, reason):
+        """Record a newly discovered evidence conflict before claiming any work."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError('需明确阻断原因')
+        with self.transaction():
+            row = self.get(job)
+            if row['status'] != 'ready' or row['token']:
+                raise ValueError('仅可阻断未领取的ready任务；运行中或未知任务须按原token对账')
+            self.event(job, STAGES[row['stage']], 'blocked', {'reason': reason, 'before_claim': True})
+            self.db.execute('UPDATE jobs SET status=?,reason=?,updated_at=? WHERE id=?',
+                            ('blocked', reason, now(), job))
+
     def hold(self, job, token, status, reason):
         if status not in ('blocked', 'uncertain') or not reason.strip():
             raise ValueError('需明确阻断或未知原因')
@@ -632,23 +558,19 @@ class Pipeline:
             self.event(job, STAGES[row['stage']], status, {'reason': reason})
             self.db.execute('UPDATE jobs SET status=?,reason=?,updated_at=? WHERE id=?', (status, reason, now(), job))
 
-    def resume(self, job, reconciliation, token=None):
+    def resume(self, job, reconciliation):
+        if not reconciliation.strip():
+            raise ValueError('必须记录核查结论')
         with self.transaction():
             row = self.get(job)
-            if row['status'] not in ('blocked', 'uncertain'):
-                raise ValueError('只可重领已暂停的任务；运行中须保留原领取凭据')
-            config = json.loads(row['config'])
-            execution = config['execution']
-            stage = STAGES[row['stage']]
+            if row['status'] not in ('blocked', 'uncertain', 'running'):
+                raise ValueError('当前状态不需要恢复')
+            execution = json.loads(row['config'])['execution']
             if row['stage'] >= STAGES.index('publish') and execution.get('local_handoff_only') is True:
                 raise ValueError('本任务仅允许本地交接，不能恢复到ERP阶段')
-            if stage in ('listing', 'publish') or (stage == 'images' and config['images'].get('enabled', True)):
-                raise ValueError('该阶段可能已提交外部请求，请按原任务核对并用原领取凭据登记结果')
-            if not token or row['token'] != token or not isinstance(reconciliation, str) or not reconciliation.strip():
-                raise ValueError('恢复须提供本阶段原领取凭据和具体核查记录')
             if row['attempts'] >= execution['max_attempts']:
-                raise ValueError('重试上限已达到，需诊断原任务')
-            self.event(job, stage, 'local_or_readonly_retry', {'conclusion': reconciliation.strip(), 'token': token})
+                raise ValueError('重试上限已达到，需修复执行器后另行处理，禁止自动重发')
+            self.event(job, STAGES[row['stage']], 'reconciled_no_external_submission', {'conclusion': reconciliation})
             self.db.execute("UPDATE jobs SET status='ready',token=NULL,reason=NULL,updated_at=? WHERE id=?", (now(), job))
 
     def status(self):
@@ -676,7 +598,7 @@ def main():
     template = sub.add_parser('template'); template.add_argument('job')
     finish = sub.add_parser('finish'); finish.add_argument('job'); finish.add_argument('--token', required=True); finish.add_argument('--evidence', required=True)
     hold = sub.add_parser('hold'); hold.add_argument('job'); hold.add_argument('--token', required=True); hold.add_argument('--status', choices=['blocked', 'uncertain'], required=True); hold.add_argument('--reason', required=True)
-    resume = sub.add_parser('resume'); resume.add_argument('job'); resume.add_argument('--token', required=True); resume.add_argument('--reconciled-no-submission', required=True)
+    resume = sub.add_parser('resume'); resume.add_argument('job'); resume.add_argument('--reconciled-no-submission', required=True)
     reserve = sub.add_parser('reserve-image-cost'); reserve.add_argument('job'); reserve.add_argument('--max-rmb', required=True)
     settle = sub.add_parser('settle-image-cost'); settle.add_argument('reservation'); settle.add_argument('--actual-rmb', required=True); settle.add_argument('--note', required=True); settle.add_argument('--external-id', default='')
     budget = sub.add_parser('image-budget-status'); budget.add_argument('--day')
@@ -712,22 +634,6 @@ def main():
             if row['stage'] >= len(STAGES): raise ValueError('任务已完成')
             stage = STAGES[row['stage']]
             result = {'job_id': args.job, 'stage': stage, 'simulated': False, 'checks': dict.fromkeys(CHECKS[stage], False), 'sources': [], 'artifacts': [], 'summary': '', 'external_ids': []}
-            if stage == 'listing':
-                result['delivery_scope'] = {'source_id': row['source_id'], 'marketplace': row['market'],
-                                            'parent_sku': '', 'variants': []}
-            if stage == 'images':
-                result['image_slots'] = []
-            if stage in ('publish','verify'):
-                identity={'publish_id':'','marketplace':row['market'],'store':json.loads(row['config'])['publishing']['store']}
-                if stage=='publish':
-                    result['publication']={**identity,'child_skus':[]}
-                else:
-                    event=p.db.execute("SELECT data FROM events WHERE job_id=? AND stage='publish' AND action='completed'",(args.job,)).fetchone()
-                    if not event:
-                        raise ValueError('缺少原发布回执')
-                    pub=published_children(json.loads(event[0]),row)
-                    result['external_ids']=[pub['publish_id']]
-                    result['workbench_publication_id'] = json.loads(event[0]).get('workbench_publication_id', '')
             if stage == 'selection':
                 cfg = json.loads(row['config']); ledger_path = Path(cfg['selection']['selected_ledger'])
                 if not ledger_path.is_absolute(): ledger_path = ROOT / ledger_path
@@ -739,7 +645,7 @@ def main():
         elif args.action == 'reserve-image-cost': result = p.reserve_image_cost(args.job, args.max_rmb)
         elif args.action == 'settle-image-cost': result = p.settle_image_cost(args.reservation, args.actual_rmb, args.note, args.external_id)
         elif args.action == 'image-budget-status': result = p.image_budget_status(args.day)
-        else: p.resume(args.job, args.reconciled_no_submission, args.token); result = p.get(args.job)
+        else: p.resume(args.job, args.reconciled_no_submission); result = p.get(args.job)
         if isinstance(result, dict): result.pop('config', None) if args.action != 'claim' else None
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

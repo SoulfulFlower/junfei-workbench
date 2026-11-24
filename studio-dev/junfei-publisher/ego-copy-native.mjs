@@ -68,9 +68,6 @@ export async function copyNative(page,input,record,persist,adapters={}){
  const api={readSource:readNativePublication,querySourceRows:queryPublicationRows,readOnline:readNativeOnline,query:queryDrafts,read:readPersistedDraft,submit:submitNativeCopy,...adapters};
  const {source,target,sourcePublication}=input;
  if(!target?.ukTarget||target.ukTarget.countryCode!=='GB'||source.accountId!==target.accountId||source.productId!==target.productId||!sourcePublication?.publishId)throw Error('跨站复制缺少对应账号产品、英国目标或真实美国任务');
- const observed=await resolvePublicationSource(page,source,sourcePublication,{read:api.readSource,query:api.querySourceRows,readOnline:api.readOnline});
- const sourceEvidence=observed.response,sourceIdentity=observed.identity;
- if(sourceIdentity.countryCode!=='US')throw Error('跨站复制来源必须是美国发布中记录');
  const fingerprint=publicationFingerprint({accountId:source.accountId,productId:source.productId,sourcePublishId:sourcePublication.publishId,
   sourceFingerprint:sourcePublication.fingerprint,target:target.ukTarget,commerce:target.ukCommerce});
  if(record.fingerprint&&record.fingerprint!==fingerprint){
@@ -83,11 +80,20 @@ export async function copyNative(page,input,record,persist,adapters={}){
   if(record.phase!=='copy_verified'||!record.draftId||!target.ukTarget.categoryHints?.path||record.fingerprint!==originalFingerprint)throw Error('复制回执来源或英国目标不符');
  }
  if(record.draftId){
-  // A prepared draft may already have its UK identity. Do not overwrite its
-  // original copy proof with a check against the pre-correction US identity.
-  if(record.phase!=='copy_verified'||!record.identity||record.identity.draftId!==String(record.draftId))throw Error('复制草稿缺少原关联证明');
+  // The copy has its own durable source proof. UK preparation reopens the
+  // exact draft. Later Amazon rewrites of the US online gallery are irrelevant.
+  const draftId=String(record.draftId),publishId=String(sourcePublication.publishId);
+  if(record.phase!=='copy_verified'||!record.fingerprint||record.sourcePublishId!==publishId||
+   record.sourceLink?.sourcePublishId!==publishId||record.sourceLink?.draftId!==draftId||record.identity?.draftId!==draftId||
+   record.identity.sourceParentSku!==source.goods.parentSku||record.sourceEvidence?.country_code!=='US'||
+   record.intent?.sourcePublishId!==publishId||record.intent.sourceFingerprint!==publicationFingerprint(record.sourceEvidence)){
+   throw Error('复制草稿缺少原关联证明');
+  }
   return record;
  }
+ const observed=await resolvePublicationSource(page,source,sourcePublication,{read:api.readSource,query:api.querySourceRows,readOnline:api.readOnline});
+ const sourceEvidence=observed.response,sourceIdentity=observed.identity;
+ if(sourceIdentity.countryCode!=='US')throw Error('跨站复制来源必须是美国发布中记录');
  Object.assign(record,{fingerprint,sourcePublishId:String(sourcePublication.publishId)});
  // Preserve the evidence used for the original copy; later reads and UK
  // corrections must not rewrite that historical source snapshot.

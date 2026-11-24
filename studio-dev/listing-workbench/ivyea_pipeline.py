@@ -31,12 +31,25 @@ APPAREL_GALLERY_DIRECTION = (
     'evidence-backed comparison, verified fit or specifications, and a closing image. Reorder or replace roles based '
     'on available evidence. If comparison, measurements or package imagery lack evidence, use a distinct supported '
     'wearing scene, styling idea, or silhouette and length view. Never fill those slots with more detail crops. '
-    'Use at most one standalone macro, at most two dominant-product images including the main image, and at least '
-    'one wider environmental scene with the garment worn. No layout may be used more than twice. Show genuine '
+    'Use at most one standalone macro. Keep the garment prominent, with tight real wearing scenes '
+    'and no arbitrary limit on hero compositions. No layout may be used more than twice. Show genuine '
     'differences in pose, framing, buyer question and scene while preserving the same sellable garment. '
     'On wearer cards with a visible face, specify head posture and gaze for each shot. Vary where the wearer looks, '
     'and do not copy a downward gaze from the reference unless the shot specifically calls for it.'
 )
+APPAREL_SEVEN_DIRECTION = (
+    'USER-REQUESTED SEVEN-IMAGE CONTRACT: EXACTLY one pure-white main in slot1; '
+    'two different evidence-backed construction detail images in slots2-3; '
+    'three tight natural lifestyle photographs in slots4-6; one actual size guide in slot7. '
+    'The single size guide is shared UNCHANGED by every colour and size variant. '
+    'Details must show two distinct real structures, large and useful. No fabricated views, claims or measurements. '
+    'Lifestyle images vary pose plus framing/composition, retain only verified angles and prominent complete garment structure. '
+    'The three lifestyle photographs may use human_context three times with genuine shot diversity; other layout families at most twice. '
+    'No advertising panels or detail collage may substitute for the three natural lifestyle jobs. '
+    'Keep source garment colour under neutral daylight, and respect the original templates only in their intended detail/selling-point slots. '
+    'On visible wearer faces specify posture and gaze, not a repeated downward source pose.'
+)
+
 
 APPAREL_NO_FILLER_DIRECTION = (
     'HIGHEST-PRIORITY APPAREL CREATIVE RULE: follow product identity analysis, a shared visual DNA, '
@@ -62,7 +75,7 @@ APPAREL_NO_FILLER_DIRECTION = (
 )
 
 
-def check_apparel_gallery(images, *, forbid_filler=False):
+def check_apparel_gallery(images, *, forbid_filler=False, seven_policy=False):
     if forbid_filler:
         quantity_question=re.compile(r'\b(?:package contents|what.?s in the box|what is included|what comes (?:in|with)|how many|one (?:top|item|piece) included)\b|包装数量|包装清单|包含几件|有几件|数量说明|件数说明',re.I)
         for index,image in enumerate(images):
@@ -72,12 +85,13 @@ def check_apparel_gallery(images, *, forbid_filler=False):
             if quantity_question.search(str(image.get('role',''))+' '+str(image.get('buyer_question',''))):
                 raise ValueError(f'第 {index+1} 张不能单独说明包装或件数；把数量并入有实际展示价值的图片。')
     detail_count=sum(core._layout_family(image)=='detail_macro' or image.get('shot_type')=='detail' for image in images)
-    if detail_count>1:
+    if seven_policy:
+        from shared_size_chart import check_seven
+        check_seven(images)
+    elif detail_count>1:
         raise ValueError('服装套图最多安排一张独立细节特写，其余图位请用不同穿着场景、版型或搭配表达。')
-    if sum(image.get('product_presence')=='hero' for image in images)>2:
-        raise ValueError('服装套图含主图最多两张以商品为绝对主体的图。')
-    if not any(image.get('product_presence')=='environmental' for image in images):
-        raise ValueError('服装套图至少需要一张展示真实穿着环境的远景。')
+    # No arbitrary hero quota or mandatory distant scene: product prominence
+    # follows the buyer question. Original historical plans remain unchanged.
 
 
 def size_chart_evidence(*candidates):
@@ -99,6 +113,52 @@ def size_chart_copy(chart):
     columns=' | '.join(map(str,chart['columns']))
     rows=[' | '.join(map(str,row)) for row in chart['rows']]
     return '\n'.join([f"{columns} ({chart['units']})",*rows])
+
+
+def project_size_chart(product, previous):
+    """Explicit current evidence wins over charts retained in old projects."""
+    supplier = product.get('supplierSizeEvidence')
+    competitor = product.get('competitorSizeEvidence')
+    if isinstance(supplier, dict) or isinstance(competitor, dict):
+        return size_chart_evidence(
+            {**supplier, 'sourceKind':'supplier'} if isinstance(supplier, dict) else None,
+            competitor)
+    return size_chart_evidence(*(item.get('sizeEvidence') for item in previous))
+
+
+def required_size_chart(product, gallery, sizes):
+    """Return the identity of the reviewed seventh image for apparel delivery."""
+    import creative_skills
+    from supplier_variants import _size
+
+    if creative_skills.select(product)['category'] != 'apparel':
+        return None
+    chart = size_chart_evidence(gallery.get('_sizeChartEvidence'))
+    if not chart or not (chart.get('sourceKind') in ('supplier','physical_measurement') or (
+            chart.get('sourceKind') == 'competitor' and chart.get('sameProductVerified') is True
+            and re.fullmatch(r'[A-Z0-9]{10}', str(chart.get('sourceAsin'))))):
+        raise ValueError('待补尺码：服装必须有供应商、实测或已核实同款竞品的尺码表')
+    if any(not all(re.search(r'\d', str(value)) for value in row[1:]) for row in chart['rows']):
+        raise ValueError('待补尺码：尺码表必须包含实际测量数值')
+    expected = {_size(str(size or '')) for size in sizes}
+    if not expected or '' in expected or not expected <= {_size(str(row[0])) for row in chart['rows']}:
+        raise ValueError('待补尺码：尺码表必须覆盖所有拟刊登尺码')
+    images = gallery.get('images') or []
+    if len(images) != 7 or images[-1].get('size_chart') is not True:
+        raise ValueError('待补尺码：服装第7张必须是尺码图')
+    card = images[-1]
+    review = card.get('render_qa') or {}
+    digest = (review.get('technical') or {}).get('sha256')
+    if (not card.get('_runId') or review.get('ready') is not True or not re.fullmatch(r'[0-9a-f]{64}', str(digest))
+            or review.get('manual_visual_review_required') and card.get('human_reviewed') is not True):
+        raise ValueError('待补尺码：服装第7张尺码图须完成数值、单位及成图校对')
+    selection = product.get('generatedGallerySelection')
+    if selection is not None:
+        selected = selection.get('items', []) if isinstance(selection, dict) else []
+        if (not isinstance(selected, list) or len(selected) != 7
+                or not isinstance(selected[6], dict) or selected[6].get('sha256') != digest):
+            raise ValueError('待补尺码：所选套图第7张与已校对尺码图不一致')
+    return digest
 
 
 def select_product_truth(refs, encode, asin_truth=None):
@@ -177,6 +237,16 @@ def captured_asin_truth(product):
     if (not capture.get('capturedAt') or capture.get('selectedAsin')!=asin
             or capture.get('market')!=(product.get('market') or imported.get('market') or 'US')):
         return None
+    # A multi-colour source ASIN may be a different child from the selected
+    # master. Use the already validated same-colour child's actual main image.
+    if product.get('masterColor'):
+        import variant_colours
+        group=variant_colours.catalog(product).get(variant_colours.colour_key(product['masterColor']))
+        if group and group.get('ready'):
+            main=next((ref for ref in group['references']
+                       if ref.get('referenceType')=='amazon_variant_main'),None)
+            if main:
+                return {'kind':'asin_main','asin':main['sourceAsin'],'url':main['url']}
     images=capture.get('referenceImages') or []
     if images and media_key(images[0]):
         return {'kind':'asin_main','asin':asin,'url':images[0]}
@@ -273,6 +343,9 @@ def shot_source(project, index):
     refs = project.get('references', [])
     card = (project.get('uiPlan') or {}).get('images', [])
     card = card[index] if card else {}
+    if card.get('production_method') == 'blocked':
+        reason = str(card.get('missing_evidence') or '缺少已核实的商品事实或实拍角度').strip()
+        return None, None, f'第 {index+1} 张分镜已标记不可制作：{reason}'
     if card.get('product_presence') == 'absent':
         return None, None, ''
     primary = refs[0] if refs else None
@@ -340,7 +413,7 @@ def compile_project(project,index):
         image['layout'] = 'poster_hero'
     profile=plan.get('product_profile') or {}
     style=core._normalise_set_style(plan.get('style',{}),profile)
-    image['photo_led_typography']=project.get('galleryDirection')=='apparel_v2_no_filler'
+    image['photo_led_typography']=project.get('galleryDirection')=='apparel_v2_no_filler' or (project.get('engine') or {}).get('version',0)>=3
     prompt=core._compile_render_prompt(image,style,profile,plan,project.get('deliverable','gallery'))
     if image['scene_direction']:
         prompt=prompt.replace('[/PRODUCT PRESENCE]', '[/PRODUCT PRESENCE]\n'
@@ -418,7 +491,7 @@ def plan_project(data,product,listing,progress=None):
         refs, truth_image = select_product_truth(refs, visual.encode_reference, asin_truth)
         reference_images = [truth_image, *[visual.encode_reference(ref) for ref in refs[1:]]]
     use_asin_truth=bool(asin_truth and refs[0]==asin_truth['url'])
-    facts={k:product.get(k,'') for k in ('name','material','style','dimensions','packageDimensions','productWeight','packageWeight','packageContents','features','targetAudience','colorNames','sizeNames','copyNotes')}
+    facts={k:product.get(k,'') for k in ('name','material','style','dimensions','packageDimensions','productWeight','packageWeight','packageContents','features','targetAudience','colorNames','sizeNames','masterColor','copyNotes')}
     brief=visual.bounded(data.get('brief',''),4000)
     skill=creative_skills.select(product)
     apparel_gallery=kind=='gallery' and skill['category']=='apparel'
@@ -426,11 +499,7 @@ def plan_project(data,product,listing,progress=None):
     chart=None
     if (apparel_gallery and count==7) or apparel_aplus:
         previous=visual.list_projects(product['id'])['projects']
-        chart=size_chart_evidence(
-            {**product['supplierSizeEvidence'],'sourceKind':'supplier'} if isinstance(product.get('supplierSizeEvidence'),dict) else None,
-            product.get('competitorSizeEvidence'),
-            *(item.get('sizeEvidence') for item in previous),
-        )
+        chart=project_size_chart(product,previous)
     if progress:progress('identity','识别同款商品外观与实拍角度',.25)
     vision=visual.vision_label()
     profile=visual.model_json(IDENTITY,{'ownProductFacts':facts,'referenceIndices':list(range(len(refs))),
@@ -445,7 +514,7 @@ def plan_project(data,product,listing,progress=None):
     # No mandatory size/packaging/comparison slot when facts cannot support one.
     narrative='1. white_main hero white_main: exact sellable product. Remaining images: choose distinct factual buyer questions based on the source assessment and creative brief. No mandatory lifestyle, size, packaging, comparison or colour chart. A macro must retain whole-product context when the crop alone is ambiguous. Do not fill missing evidence with invented views or repetitive crops.'
     if apparel_gallery:
-        narrative=APPAREL_GALLERY_DIRECTION
+        narrative=APPAREL_SEVEN_DIRECTION if count==7 else APPAREL_GALLERY_DIRECTION
     if kind=='aplus':
         narrative=('Build one brand story across a 1464x600 brand banner, primary benefit, usage or education, '
                    'an evidenced detail or comparison, and a trust close. Use one distinct buyer question per module. '
@@ -462,7 +531,13 @@ def plan_project(data,product,listing,progress=None):
         narrative+=' '+prompt_direction
     ctx=json.dumps({'ownProductFacts':facts,'buyerQuestions':review_insights.context(product,product.get('market','UK'))},ensure_ascii=False)
     if progress and kind=='gallery':progress('templates','分析竞品套图的版式',.32)
-    templates,layout_note=analyze_layout_references(product,visual,refs[0]) if kind=='gallery' else ([], '')
+    import official_image_templates as official_library
+    official_count=count-(1 if kind=='gallery' else 0)-(1 if (apparel_gallery and count==7) or apparel_aplus else 0)
+    official_records=official_library.assignments(product,max(1,official_count),kind,
+        data.get('layoutTemplateIds') or data.get('officialTemplateIds'))
+    templates=[{**r,'index':i,'layout':'official','shot_type':'official'} for i,r in enumerate(official_records)]
+    layout_note='Original public template artwork and verbatim prompts, bound by immutable template ID'
+    planning_images=[reference_images[0]]+[visual.encode_reference(r['url']) for r in official_records]
     template_text=json.dumps([{k:v for k,v in item.items() if k!='url'} for item in templates],ensure_ascii=False) if templates else ''
     insights=product_insights.context(product)
     insight_text=json.dumps(insights.get('observations',[]),ensure_ascii=False) if insights else ''
@@ -489,7 +564,7 @@ def plan_project(data,product,listing,progress=None):
              +json.dumps(choices,ensure_ascii=False)
              +('. For apparel keep only verified camera angles, require different poses and at least one different framing or composition. '
                if apparel_gallery else '. Every pair of scene images must differ in all four fields. ')+ 'Changing the background alone does not count. '
-             'Do not use any layout family more than twice.')
+             +('For the requested three lifestyle photographs the human_context family may occur three times, with distinct source-supported pose and framing/composition; other layout families at most twice.' if apparel_gallery and count==7 else 'Do not use any layout family more than twice.'))
     prompt+=('\nUse the verified per-photo views below for scene camera angles. A different SKU, a competitor layout, '
              'or the model’s ability to imagine another angle cannot prove an unseen view. If only one angle is verified, '
              +('retain it across supported scenes while varying pose and framing or composition. ' if apparel_gallery
@@ -510,23 +585,32 @@ def plan_project(data,product,listing,progress=None):
             'Size evidence: '+json.dumps(chart or {},ensure_ascii=False)
         )
     if progress:progress('plan','AI 正在编排整套分镜',.4)
+    apparel_orchestration=None
+    if apparel_gallery or apparel_aplus:
+        import apparel_suite
+        prompt+='\n'+apparel_suite.formal_direction()
+        apparel_orchestration={'version':apparel_suite.VERSION,
+            'implementation':'independent-codex-reconstruction','formalSizeChartGateBypassed':False,
+            'sourceReferenceOrder':list(refs),'originalUserBrief':brief,
+            'facts':facts,'unverifiedInferences':profile.get('uncertainties',[])}
     planning_instruction=creative_skills.instruction(skill,'plan')+'\n'+prompt
     planning_context={'facts':facts,'referenceIndexMap':dict(enumerate(refs))}
-    native=visual.model_json(planning_instruction,planning_context,[])
+    native=visual.model_json(planning_instruction,planning_context,planning_images)
     proposed=native.get('images')
     if apparel_gallery and isinstance(proposed,list) and len(proposed)==count and all(isinstance(card,dict) for card in proposed):
         try:
-            check_apparel_gallery(proposed,forbid_filler=True)
+            check_apparel_gallery(proposed,forbid_filler=True,seven_policy=count==7)
         except ValueError as issue:
             if progress:progress('plan','调整未通过策略检查的服装分镜',.55)
             native=visual.model_json(
                 planning_instruction+'\nRevise the complete set to resolve this deterministic strategy check: '+str(issue),
-                {**planning_context,'previousStoryboard':proposed},[])
+                {**planning_context,'previousStoryboard':proposed},planning_images)
     if progress:progress('compile','绑定实拍并检查图位可生成性',.85)
     images=native.get('images')
     if not isinstance(images,list) or len(images)!=count:raise ValueError('策划张数不完整，未保存通用模板')
     style=core._normalise_set_style(native.get('style',{}),profile)
-    native.update(style=style,product_profile=profile,deliverable=kind,creative_brief=brief,visual_tone=tone,language=data.get('language','en'),planner='ivyea-director-v2',product_source_url=refs[0])
+    native.update(style=style,product_profile=profile,deliverable=kind,creative_brief=brief,visual_tone=tone,language=data.get('language','en'),planner='official-original-director-v4',product_source_url=refs[0])
+    if apparel_orchestration:native['apparelOrchestration']=apparel_orchestration
     slots=[]
     used_templates=set()
     for i,image in enumerate(images):
@@ -555,6 +639,13 @@ def plan_project(data,product,listing,progress=None):
             if template:
                 image.update(template_url=template['url'],template_index=template['index'])
                 used_templates.add(template['index'])
+        image['photo_led_typography']=True
+        if apparel_orchestration:image['apparelOrchestration']=apparel_orchestration
+        if not main and not image.get('size_chart'):
+            bound=official_records[(i-1 if kind=='gallery' else i)%len(official_records)]
+            image['template_url']=bound['url']
+            image['official_template']=bound
+            image.pop('layout_blueprint',None)
         for key in ('headline','subline','evidence','buyer_question','scene','visual_concept','camera_direction'):
             image[key]=visual.bounded(image.get(key,''),2500 if key=='evidence' else 800)
         image['render_prompt']=visual.bounded(image.get('render_prompt',''),20000)
@@ -563,12 +654,17 @@ def plan_project(data,product,listing,progress=None):
             composition=core._compile_render_prompt(image,style,profile,native,kind)
         slots.append({'index':i,'question':image['buyer_question'],'evidence':image['evidence'],'composition':composition,'headline':image['headline'],'caption':image['subline'],'purpose':image.get('role','')})
     if apparel_gallery:
-        check_apparel_gallery(images,forbid_filler=True)
+        check_apparel_gallery(images,forbid_filler=True,seven_policy=count==7)
     identity=str(native.get('product_lock') or '; '.join(map(str,profile['fidelity_anchors'])))
     plan={'identity':identity,'palette':style['palette_hex'],'lighting':style['lighting'],'typography':style['type_system'],'audience':str(profile.get('category_family','')),'warnings':profile.get('uncertainties',[]),'slots':slots}
     planner=visual.provider.settings_public()
-    project={'id':uuid.uuid4().hex,'productId':product['id'],'references':refs,'brief':brief,'created':time.time(),'plan':plan,'uiPlan':native,'confirmed':False,'deliverable':kind,'language':native['language'],'creativeSkills':skill,'analysis':{'sourceAssessment':profile.get('source_assessment',{}),'identityModel':vision.rsplit('/',1)[-1],'storyboardModel':planner['model'],'referenceCount':len(refs),'paidRenderingStarted':False},'engine':{'name':'IvyeaOps source migration','version':2,'vision':vision,'planner':planner['provider'],'renderer':'original deterministic compiler'}}
+    project={'id':uuid.uuid4().hex,'productId':product['id'],'references':refs,'brief':brief,'created':time.time(),'plan':plan,'uiPlan':native,'confirmed':False,'deliverable':kind,'language':native['language'],'creativeSkills':skill,'analysis':{'sourceAssessment':profile.get('source_assessment',{}),'identityModel':vision.rsplit('/',1)[-1],'storyboardModel':planner['model'],'referenceCount':len(refs),'paidRenderingStarted':False},'engine':{'name':'IvyeaOps source migration','version':4,'vision':vision,'planner':planner['provider'],'renderer':'official original artwork and prompt compiler v4'}}
     project['productionMode']=production_mode
+    if apparel_gallery and count==7:project['galleryImagePolicy']='seven-shared-size-v1'
+    if apparel_orchestration:
+        project['apparelOrchestration']=apparel_orchestration
+        project['engine']['version']=5
+        project['engine']['renderer']='official artwork with explicit apparel orchestration v5'
     project['analysis']['layoutNote']=layout_note
     if use_asin_truth:
         project['analysis']['productTruthSource']=asin_truth

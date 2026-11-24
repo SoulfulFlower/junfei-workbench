@@ -15,6 +15,7 @@ from pathlib import Path
 import image_provider
 import provider
 import creative_skills
+import image_composition
 
 DB = app_paths.DATA / 'visual_studio.sqlite3'
 WORKER_LOCK = threading.Lock()
@@ -46,10 +47,17 @@ def encode_reference(ref):
     return 'data:'+mime+';base64,'+base64.b64encode(raw).decode()
 
 def proxy_vision_settings():
-    if not image_provider.KEY:
-        settings=provider.text_settings()
-        if provider.text_provider_name(settings)=='Codex Tools' and settings['api_key']:
-            return settings
+    settings=provider.text_settings()
+    if provider.text_provider_name(settings)=='Codex Tools':
+        if not settings.get('api_key'):
+            raise ValueError('当前账号 Codex Tools 凭据缺失；未改用其他服务')
+        return settings
+    # Old APIMart accounts remain compatible, but a Codex image account must
+    # explicitly use Codex for analysis/planning/review as well.
+    if image_provider.active_provider()=='openai':
+        import openai_image_provider as custom
+        if custom.public()['baseUrl']==custom.CODEX_TOOLS_BASE:
+            raise ValueError('请将当前账号的文本/视觉分析也设置为 Codex Tools')
     return None
 
 
@@ -89,7 +97,7 @@ def _analysis_response(messages, images, *, market, purpose, json_output):
             result=image_provider.api('chat/completions',body)
             provider_name='APIMart'
     else:
-        settings=provider.text_settings()
+        settings=proxy_vision_settings() or provider.text_settings()
         provider_name=provider.text_provider_name(settings)
         body['thinking']={'type':'disabled'}
         if json_output:
@@ -356,6 +364,10 @@ def _revision_cached_pixels(c,run):
 
 
 def _revision_review(run):
+    # An explicit recheck judges the selected bytes again. Its inherited
+    # generation candidates remain history and cannot override that new result.
+    if run.get('mode') == 'existing_artwork_review':
+        return (run.get('qc') or [{}])[-1]
     selected=next((candidate.get('qc') for candidate in run.get('candidates',[])
                    if candidate.get('jobId')==run.get('selectedJobId')),None)
     qc=selected or (run.get('qc') or [{}])[-1]
@@ -491,7 +503,7 @@ def _save_plan_revision(c,data, *, confirmed=False):
 
 def compile_prompt(project,index):
     from ivyea_pipeline import compile_project
-    return compile_project(project,index)
+    return compile_project(project,index)+'\n'+image_composition.INSTRUCTION
 
 
 def check_render_prompt(project,index):
@@ -499,12 +511,12 @@ def check_render_prompt(project,index):
     from ivyea_render_core import _is_detail_crop
     if project.get('uiPlan') and project.get('deliverable','gallery')=='gallery':
         from storyboard_variety import gallery_issues
-        issues=gallery_issues(project['uiPlan']['images'],shared_verified_angle=project.get('galleryDirection')=='apparel_v2_no_filler')
+        issues=gallery_issues(project['uiPlan']['images'],shared_verified_angle=project.get('galleryDirection')=='apparel_v2_no_filler',seven_policy=project.get('galleryImagePolicy')=='seven-shared-size-v1')
         if issues:
             raise ValueError('生图前分镜检查未通过：'+' '.join(issues))
     if project.get('galleryDirection') in ('apparel_v1','apparel_v2_no_filler'):
         from ivyea_pipeline import check_apparel_gallery
-        check_apparel_gallery(project['uiPlan']['images'],forbid_filler=project.get('galleryDirection')=='apparel_v2_no_filler')
+        check_apparel_gallery(project['uiPlan']['images'],forbid_filler=project.get('galleryDirection')=='apparel_v2_no_filler',seven_policy=project.get('galleryImagePolicy')=='seven-shared-size-v1')
     prompt=compile_prompt(project,index)
     if not isinstance(prompt,str) or not prompt.strip():
         raise ValueError(f'第{index+1}张的生图提示词为空')
@@ -541,11 +553,13 @@ def slot_references(project,index,*,allow_missing_evidence=False):
     from ivyea_pipeline import shot_source
     refs=project['references']
     card=project['uiPlan']['images'][index] if project.get('uiPlan') else {}
+    source, _, issue=shot_source(project,index)
+    if card.get('production_method')=='blocked':
+        raise ValueError(issue or '分镜缺少依据，尚不可制作')
     if card.get('product_presence')=='absent':
         if card.get('template_url'):
             raise ValueError('不展示商品的图位不能绑定版式参考图')
         return []
-    source, _, issue=shot_source(project,index)
     if issue and not allow_missing_evidence:
         raise ValueError(issue)
     if not source:
@@ -561,7 +575,7 @@ def slot_references(project,index,*,allow_missing_evidence=False):
     return [source,template]
 
 
-def generate(data, *, expected_provider=None, expected_project_digest=None, only_new=False):
+def generate(data, *, expected_provider=None):
     p=get_project(data.get('id'));index=data.get('slot')
     if not p['confirmed'] or type(index) is not int or not 0<=index<len(p['plan']['slots']):
         raise ValueError('请先保存并确认整套分镜，再选择图片用途')
@@ -576,13 +590,6 @@ def generate(data, *, expected_provider=None, expected_project_digest=None, only
         r['config']['deliveryCanvas']='1464x600'
     with WORKER_LOCK:
         with closing(db()) as c:
-            if expected_project_digest is not None:
-                from listing_jobs import digest
-                if digest(get_project(p['id'])) != expected_project_digest or digest(p) != expected_project_digest:
-                    raise ValueError('分镜已经变化，请核对当前版本')
-            if only_new and c.execute("SELECT 1 FROM runs WHERE project_id=? AND json_extract(body,'$.slot')=?",
-                                      (p['id'], index)).fetchone():
-                raise ValueError('图位已有任务，请先核对原回执')
             runs=c.execute('SELECT runs.body FROM runs JOIN projects ON projects.id=runs.project_id WHERE projects.product_id=?',(p['productId'],))
             if any(json.loads(row[0])['status'] in ('submitting','generating','reviewing','repairing') for row in runs):
                 raise ValueError('当前产品还有图片生成或质检正在进行，请等该图位完成后再生成下一张')
@@ -643,6 +650,7 @@ def review(p,index,url,source_layout=False,*,submitted_references=None):
     instruction=(creative_skills.instruction(skill,'quality') if skill else '')+QC_INSTRUCTION
     instruction+='\nImage1 is the INPUT reference, image2 is the OUTPUT being judged. Judge faults in image2 only. Floating source marketing overlays must be removed: their absence is correct, not a defect. issues must contain ONLY actual output defects or unresolved product identity differences, never positive observations, acceptable omissions or generic advice. Do not require main-image restrictions on secondary slots. Use supplied slot evidence for supported facts; visual evidence alone cannot prove material composition. Check every inset as well as the main frame. If sourceUnknowns marks rear construction, interiors or hidden features as unknown, reject artwork that exposes invented details of those regions; a plausible-looking back view is not evidence. Judge the actual planned composition rather than assuming mandatory content from frame position.'
     instruction+=PRODUCT_FACT_QC
+    instruction+='\nReject artwork that violates this composition rule: '+image_composition.INSTRUCTION
     if p.get('galleryDirection')=='apparel_v2_no_filler':
         instruction+=APPAREL_NO_FILLER_QC
     card=p['uiPlan']['images'][index] if p.get('uiPlan') else {}
@@ -700,7 +708,7 @@ def review(p,index,url,source_layout=False,*,submitted_references=None):
         instruction+=(
             '\nMEASUREMENT TABLE: sizeChart is the saved source chart. Compare the actual cells in image2 '
             'against it, not against the listing copy or a photograph. Return observedSizeChart with columns, rows '
-            'and units read from the artwork and singleHeader as a boolean. Ignore typography case only. '
+            'and units read from the artwork, with singleHeader as a boolean INSIDE observedSizeChart. Ignore typography case only. '
             'Fail textPass for missing or extra rows, wrong numbers, wrong units or repeated headers.'
         )
     expected_copy=(__import__('studio_bridge').artwork_copy(card) if card else
@@ -746,9 +754,13 @@ def review(p,index,url,source_layout=False,*,submitted_references=None):
     normalize=lambda s:' '.join(unicodedata.normalize('NFKC',s).split()).casefold()
     if table:
         read=answer.get('observedSizeChart')
+        header_values=[answer['singleHeader']] if 'singleHeader' in answer else []
+        if isinstance(read,dict) and 'singleHeader' in read:
+            header_values.append(read['singleHeader'])
+        single_header=bool(header_values) and all(value is True for value in header_values)
         normalize_cells=lambda row:[normalize(str(value)) for value in row] if isinstance(row,list) else None
         read_rows=read.get('rows') if isinstance(read,dict) else None
-        if (not isinstance(read,dict) or read.get('singleHeader') is not True
+        if (not isinstance(read,dict) or not single_header
                 or normalize(str(read.get('units')))!=normalize(table['units'])
                 or normalize_cells(read.get('columns'))!=normalize_cells(table['columns'])
                 or not isinstance(read_rows,list)
@@ -783,7 +795,8 @@ def review(p,index,url,source_layout=False,*,submitted_references=None):
             warnings.append('辅助图商品保真评分 '+str(scores['product_fidelity'])+'/100；按常规电商标准保留轻微差异提醒，仍须核对产品')
         score_fields={'scores':scores,'score':round(sum(scores[k] for k in score_keys)/len(score_keys)),
                       'qualityPolicy':'ecommerce-supporting-v1','warnings':warnings}
-    return {**{k:answer[k] for k in flags},**score_fields,'shotChecks':shot_checks,'observedText':observed,'issues':issues,'reviewModel':vision_label(),'pass':all(answer[k] for k in flags) and not issues,'at':time.time()}
+    table_readback={'observedSizeChart':read,'singleHeader':single_header} if table else {}
+    return {**{k:answer[k] for k in flags},**score_fields,**table_readback,'shotChecks':shot_checks,'observedText':observed,'issues':issues,'reviewModel':vision_label(),'pass':all(answer[k] for k in flags) and not issues,'at':time.time()}
 
 def advance(rid):
     r=get_run(rid)
@@ -817,7 +830,8 @@ def advance(rid):
                     raw=image_provider.local_image(asset['sourceAsset']['url'])
             technical=image_quality.inspect(raw,expected=job.get('canvas') if local else None,
                                              main=r['slot']==0 and gallery,
-                                             minimum=600 if wide_aplus else 1600,full_bleed=full_bleed)
+                                             minimum=600 if wide_aplus else 1600,full_bleed=full_bleed,
+                                             size_chart=bool((p.get('uiPlan') or {}).get('images', [{}]*7)[r['slot']].get('size_chart')) if gallery and p.get('uiPlan') else False)
             target=[1464,600] if wide_aplus else [1600,1600]
             if (technical['pass'] and (wide_aplus or square_gallery) and technical['dimensions']!=target
                     and (wide_aplus or r['slot']!=0 or technical['dimensions'][0]==technical['dimensions'][1])):
@@ -829,9 +843,16 @@ def advance(rid):
                 mime='image/png'
                 artwork_url=image_provider.custom_images.cache_image(raw)['url']
                 technical=image_quality.inspect(raw,expected=target,main=gallery and r['slot']==0,
-                                                 minimum=600 if wide_aplus else 1600,full_bleed=full_bleed)
+                                                 minimum=600 if wide_aplus else 1600,full_bleed=full_bleed,
+                                                 size_chart=bool(p['uiPlan']['images'][r['slot']].get('size_chart')) if gallery and p.get('uiPlan') else False)
                 technical['providerOutput']={'dimensions':source_technical['dimensions'],
                                              'sha256':source_technical['sha256']}
+            if gallery:
+                composition=image_composition.for_project(raw,p,r['slot'])
+                technical['composition']=composition
+                known={issue['code'] for issue in technical['issues']}
+                technical['issues'].extend(issue for issue in composition['issues'] if issue['code'] not in known)
+                technical['pass']=technical['pass'] and composition['pass']
             technical_errors={issue['code'] for issue in technical['issues'] if issue['severity']=='error'}
             if local or not technical['pass']:
                 qc={'pass':technical['pass'],'issues':[item['message'] for item in technical['issues'] if item['severity']=='error'],

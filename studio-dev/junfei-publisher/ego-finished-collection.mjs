@@ -6,6 +6,7 @@ import {collectInbox} from './ego-collection-inbox.mjs';
 import {saveDraft} from './ego-draft-save.mjs';
 import {readPersistedDraft,verifyPersistedDraft} from './ego-draft-readback.mjs';
 import {verifyRemoteAsset} from './ego-draft-images.mjs';
+import {writeJsonAtomic} from './atomic_write_json.mjs';
 
 export function patchDraftPayload(body,input,urls){
   const d=input.destination,g=input.goods,variants=input.goodsItems;
@@ -127,7 +128,7 @@ export async function collectFinishedDraft(page,input,receipt){
   let record;
   try{record=JSON.parse(await fs.readFile(receipt,'utf8'));if(record.snapshotSha256!==input.sha256)throw Error('采集快照变化，先核对原操作');}
   catch(e){if(e.code!=='ENOENT')throw e;record={status:'prepared',draftId:String(d.draftId),draftUrl:url,accountId:input.accountId,productId:input.productId,snapshotSha256:input.sha256,published:false,variantChecks:[],createdAt:new Date().toISOString()};await fs.writeFile(receipt,JSON.stringify(record,null,2),{flag:'wx'});}
-  const persist=async()=>{await fs.writeFile(receipt+'.tmp',JSON.stringify(record,null,2));await fs.rename(receipt+'.tmp',receipt);};
+  const persist=()=>writeJsonAtomic(receipt,record);
   try{
     // A newly transferred draft is configured through its visible ERP form.
     // Keep that form until its first Save; the native transfer already has a

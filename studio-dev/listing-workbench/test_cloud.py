@@ -11,13 +11,13 @@ class CloudTests(unittest.TestCase):
     def test_forwarded_https_requires_explicit_loopback_trust(self):
         handler = object.__new__(server.Handler)
         handler.connection = object()
-        handler.headers = {'X-Forwarded-Proto': 'https', 'Host': '101.32.128.180'}
+        handler.headers = {'X-Forwarded-Proto': 'https', 'Host': '203.0.113.10'}
         handler.client_address = ('127.0.0.1', 1234)
         with patch.dict(os.environ, {'JUNFEI_TRUST_PROXY': '0'}):
             self.assertFalse(handler.secure_request())
         with patch.dict(os.environ, {'JUNFEI_TRUST_PROXY': '1'}):
             self.assertTrue(handler.secure_request())
-            self.assertEqual(handler.origin(), 'https://101.32.128.180')
+            self.assertEqual(handler.origin(), 'http://127.0.0.1:18765')
             handler.client_address = ('198.51.100.1', 1234)
             self.assertFalse(handler.secure_request())
 

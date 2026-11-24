@@ -1,19 +1,49 @@
-function collectorServerUrl(){const value=document.getElementById('serverUrl').value.trim()||'https://101.32.128.180';const url=new URL(value);if(url.username||url.password||url.pathname!=='/'||url.search||url.hash||!(url.protocol==='https:'||url.origin==='http://127.0.0.1:18765'))throw Error('请输入HTTPS工作台根地址，或本机 http://127.0.0.1:18765');return url.origin}
+const defaultCollectorServer='http://127.0.0.1:18769';
+function isLocalCollector(url){return url.protocol==='http:'&&url.hostname==='127.0.0.1'&&['18765','18775'].includes(url.port)}
+function collectorServerUrl(){const url=new URL(document.getElementById('serverUrl').value.trim()||defaultCollectorServer);if(url.username||url.password||url.pathname!=='/'||url.search||url.hash||!(url.protocol==='https:'||isLocalCollector(url)))throw Error('请输入HTTPS工作台根地址，或本机 http://127.0.0.1:18769');return url.origin}
 let binding=null;
 let targetCapture=null;
 const targetReady=chrome.tabs.query({active:true,currentWindow:true}).then(([tab])=>{try{const q=new URLSearchParams(new URL(tab.url).hash.slice(1));if(q.get('junfeiProductId'))targetCapture={id:q.get('junfeiProductId'),name:q.get('junfeiProductName'),account:q.get('junfeiAccount'),market:q.get('junfeiMarket')};}catch{}const label=document.getElementById('captureTarget');label.textContent=targetCapture?'采集到：'+(targetCapture.name||targetCapture.id)+' / '+targetCapture.id:'未绑定产品：按货源链接匹配，找不到则新建产品';if(targetCapture?.market)document.getElementById('market').value=targetCapture.market;});
 const $=id=>document.getElementById(id);
 function is1688SearchUrl(value){try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password&&(!url.port||url.port==='443')&&(['s.1688.com','search.1688.com','1688.com'].includes(url.hostname.toLowerCase())||(url.hostname==='air.1688.com'&&['/kapp/1688-search/pc-image-search','/kapp/1688-search/pc-image-search/'].includes(url.pathname)));}catch{return false;}}
-function renderBinding(){const logged=!!binding;$('loginForm').hidden=logged;$('accountBox').hidden=!logged;$('capture').disabled=!logged;$('currentAccount').textContent=logged?'当前账号：'+binding.user.name+'（'+binding.user.username+'）':'';}
+function renderBinding(){
+ const connected=!!binding;
+ let local=false;
+ try{local=isLocalCollector(new URL(collectorServerUrl()));}catch{}
+ $('loginForm').hidden=connected;
+ $('localPair').hidden=!local;
+ $('teamLogin').open=!local;
+ $('accountBox').hidden=!connected;
+ $('capture').disabled=!connected||binding.url!==$('serverUrl').value.trim().replace(/\/$/,'');
+ $('currentAccount').textContent=connected?(binding.user.username==='local-workspace'?'已连接本机工作台':'当前工作区：'+binding.user.name):'';
+}
 async function clearBinding(){binding=null;await chrome.storage.local.remove(['captureToken','captureUser','boundServer']);renderBinding();}
 async function request(url,path,body,token){const r=await fetch(url+path,{method:'POST',credentials:'omit',headers:{'Content-Type':'application/json',...(token?{'X-Capture-Token':token}:{})},body:JSON.stringify(body||{})});const d=await r.json();if(!r.ok)throw Error(d.error||'请求失败');return d;}
-const ready=chrome.storage.local.get(['captureToken','captureUser','boundServer','serverUrl']).then(async d=>{$('serverUrl').value=d.serverUrl||'https://101.32.128.180';if(d.captureToken&&d.captureUser&&d.boundServer){binding={token:d.captureToken,user:d.captureUser,url:d.boundServer};renderBinding();try{const result=await request(binding.url,'/api/auth/extension-status',{},binding.token);binding.user=result.user;renderBinding();}catch(e){$('status').textContent='请重新登录：'+e.message;await clearBinding();}}else renderBinding();});const associationReady=Promise.all([ready,targetReady]).then(async()=>{const [tab]=await chrome.tabs.query({active:true,currentWindow:true});const d=await chrome.storage.local.get(['linkedAsin','linkedMarket','linkedOwner','linkedImageUrl']);if(binding&&d.linkedAsin&&d.linkedOwner===binding.user.username){$('asin').value=d.linkedAsin;$('market').value=d.linkedMarket||'US';if(is1688SearchUrl(tab?.url||'')&&d.linkedImageUrl)$('uploadReference').hidden=false;}});
+const ready=chrome.storage.local.get(['captureToken','captureUser','boundServer','serverUrl']).then(async d=>{$('serverUrl').value=d.serverUrl||defaultCollectorServer;if(d.captureToken&&d.captureUser&&d.boundServer){binding={token:d.captureToken,user:d.captureUser,url:d.boundServer};renderBinding();try{const result=await request(binding.url,'/api/auth/extension-status',{},binding.token);binding.user=result.user;renderBinding();}catch(e){$('status').textContent='请重新连接工作台：'+e.message;await clearBinding();}}else renderBinding();});const associationReady=Promise.all([ready,targetReady]).then(async()=>{const [tab]=await chrome.tabs.query({active:true,currentWindow:true});const d=await chrome.storage.local.get(['linkedAsin','linkedMarket','linkedOwner','linkedImageUrl']);if(binding&&d.linkedAsin&&d.linkedOwner===binding.user.username){$('asin').value=d.linkedAsin;$('market').value=d.linkedMarket||'US';if(is1688SearchUrl(tab?.url||'')&&d.linkedImageUrl)$('uploadReference').hidden=false;}});
 async function saveAssociation(){if(!binding)return;const asin=$('asin').value.trim().toUpperCase();if(asin&&!/^[A-Z0-9]{10}$/.test(asin))return;await chrome.storage.local.set({linkedAsin:asin,linkedMarket:$('market').value,linkedOwner:binding.user.username});}
 $('asin').addEventListener('change',saveAssociation);$('market').addEventListener('change',saveAssociation);
 $('clearAssociation').onclick=async()=>{await chrome.storage.local.remove(['linkedAsin','linkedMarket','linkedOwner','linkedImageUrl']);$('asin').value='';$('status').textContent='已清除关联 ASIN；后续采集不会关联到该商品。';};
 $('login').onclick=async()=>{const btn=$('login');btn.disabled=true;try{await ready;const url=collectorServerUrl();if(url.startsWith('https:')&&!await chrome.permissions.request({origins:[url+'/*']}))throw Error('需要允许插件连接工作台');const result=await request(url,'/api/auth/extension-login',{username:$('username').value.trim(),password:$('password').value});binding={token:result.token,user:result.user,url};await chrome.storage.local.set({captureToken:binding.token,captureUser:binding.user,boundServer:url,serverUrl:url});$('password').value='';renderBinding();$('status').textContent='✓ 登录成功，采集将保存到当前员工账号';}catch(e){$('status').textContent='✕ '+e.message;}finally{btn.disabled=false;}};
-$('logout').onclick=async()=>{try{if(binding)await request(binding.url,'/api/auth/extension-logout',{},binding.token);await clearBinding();$('status').textContent='已退出，请登录其他账号';}catch(e){$('status').textContent='退出失败，请检查网络后重试：'+e.message;}};
-$('serverUrl').addEventListener('input',()=>{$('capture').disabled=!binding||binding.url!==$('serverUrl').value.trim().replace(/\/$/,'');});
+$('pairCapture').onclick=async()=>{
+ const button=$('pairCapture');
+ button.disabled=true;
+ try{
+  await ready;
+  const url=collectorServerUrl();
+  if(!isLocalCollector(new URL(url)))throw Error('配对码仅用于本机工作台');
+  const code=$('captureCode').value.trim();
+  if(!/^[A-Za-z0-9_-]{43}$/.test(code))throw Error('请填写工作台「采集插件」里生成的完整配对码');
+  const result=await request(url,'/api/auth/extension-status',{},code);
+  await chrome.storage.local.set({captureToken:code,captureUser:result.user,boundServer:url,serverUrl:url});
+  binding={token:code,user:result.user,url};
+  $('captureCode').value='';
+  renderBinding();
+  $('status').textContent='✓ 已连接本机工作台';
+ }catch(error){$('status').textContent='✕ '+error.message;}
+ finally{button.disabled=false;}
+};
+$('logout').onclick=async()=>{try{if(binding)await request(binding.url,'/api/auth/extension-logout',{},binding.token);await clearBinding();$('status').textContent='已断开工作台';}catch(e){$('status').textContent='断开失败，请检查网络后重试：'+e.message;}};
+$('serverUrl').addEventListener('input',renderBinding);
 renderBinding();
 async function copyAmazonReferenceToClipboard(imageUrl){const image=new URL(imageUrl);if(image.protocol!=='https:'||image.hostname!=='m.media-amazon.com'||!image.pathname.startsWith('/images/I/'))throw Error('Invalid Amazon image URL');const origins=['https://m.media-amazon.com/*'];if(!await chrome.permissions.request({origins}))throw Error('Allow access to Amazon product images');const response=await fetch(image.href,{credentials:'omit'});if(!response.ok)throw Error('Amazon reference image could not be read');const source=await response.blob();if(!source.type.startsWith('image/')||source.size>15*1024*1024)throw Error('Unsupported image or image exceeds 15 MB');const bitmap=await createImageBitmap(source);const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;canvas.getContext('2d').drawImage(bitmap,0,0);const png=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!png)throw Error('Image conversion failed');await navigator.clipboard.write([new ClipboardItem({'image/png':png})]);}
 document.getElementById('imageSearch').onclick=async()=>{const button=$('imageSearch'),status=$('status');button.disabled=true;status.textContent='\u6b63\u5728\u590d\u5236 Amazon \u5546\u54c1\u4e3b\u56fe';try{const [tab]=await chrome.tabs.query({active:true,currentWindow:true});const url=new URL(tab.url||'');const host=url.hostname.replace(/^www\./,'');const markets={'amazon.com':'US','amazon.co.uk':'UK','amazon.de':'DE','amazon.fr':'FR','amazon.it':'IT','amazon.es':'ES','amazon.ca':'CA','amazon.co.jp':'JP','amazon.in':'IN','amazon.com.mx':'MX','amazon.com.au':'AU','amazon.com.br':'BR'};if(!markets[host])throw Error('Open an Amazon product page first');const path=url.pathname.split('/').filter(Boolean);const marker=path.findIndex((part,index)=>part.toLowerCase()==='dp'||(part.toLowerCase()==='product'&&path[index-1]==='gp'));const asin=path[marker+(path[marker]?.toLowerCase()==='dp'?1:1)]?.toUpperCase();if(marker<0||!asin||!/^[A-Z0-9]{10}$/.test(asin))throw Error('Could not identify the Amazon ASIN');const [{result:imageUrl}]=await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>{const image=document.querySelector('#landingImage, #imgBlkFront');return image?.getAttribute('data-old-hires')||image?.currentSrc||image?.src||'';}});await chrome.storage.local.set({linkedAsin:asin,linkedMarket:markets[host],linkedOwner:binding?.user?.username||'',linkedImageUrl:imageUrl});await copyAmazonReferenceToClipboard(imageUrl);await chrome.tabs.create({url:'https://s.1688.com/'});$('asin').value=asin;$('market').value=markets[host];status.textContent='\u5546\u54c1\u56fe\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u5e76\u6253\u5f001688\u3002\u8bf7\u76f4\u63a5\u70b9\u51fb\u641c\u7d22\u6846\uff0c\u6309 Ctrl+V \u7c98\u8d34\u56fe\u7247\uff1b\u4e0d\u8981\u70b9\u51fb\u201c\u4ee5\u56fe\u641c\u6b3e\u201d\u6309\u94ae\u3002';}catch(e){status.textContent='\u64cd\u4f5c\u5931\u8d25\uff1a'+e.message;}finally{button.disabled=false;}};

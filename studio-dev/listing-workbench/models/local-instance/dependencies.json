@@ -1,0 +1,23 @@
+{
+  "versions": {
+    "torch": "2.6.0+cpu",
+    "torchvision": "0.21.0+cpu",
+    "transformers": "5.0.0",
+    "numpy": "1.26.4",
+    "Pillow": "12.3.0",
+    "safetensors": "0.8.0",
+    "huggingface-hub": "1.33.0",
+    "tokenizers": "0.22.2"
+  },
+  "moduleSha256": {
+    "torch": "0901a8ad92b30f947405e28fc98dd21c578cfbe8796b0173de931f42079b1f89",
+    "sam2Model": "aa3794c93beef07f3b21eee6d435ea46e4b3f2f8f34d0c7eb7e975aeb7e8e73f",
+    "sam2Processor": "dc1e77fb37162187ba5f5f56643c71dbe1d0b89c441c9497766cd46635f7e61b",
+    "sam2ImageProcessor": "f61491b5eb504c66b4bc5da6758c1cc6a2b2967059abedb79eb9f6c4bce9c21d"
+  },
+  "nativeSha256": {
+    "torchBinding": "c52da31219dde131a85a9cacf9c3838e6552ae2c0c04e9fadb2e5fe795a00f81",
+    "torchCpu": "4ac489cd25309b8ada94275f01e8135c407b41306c94e6bcb1f7698038b9435a"
+  },
+  "scope": "Fixed CPU dependencies; torch/torchvision are read-only existing HQ-SAM environment dependencies."
+}

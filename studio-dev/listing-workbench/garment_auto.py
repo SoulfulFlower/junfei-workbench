@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-VERSION='auto-cloth-v8'
+VERSION='auto-cloth-v15-semantic-protection'
 LOCK=threading.RLock()
 _parser=None
 _human_parser=None
@@ -21,8 +21,8 @@ def category(product):
     text=' '.join(str(product.get(k) or '') for k in ('name','title','productName','category','categoryName')).lower()
     import re
     if re.search(r'连衣裙|连体|\b(dress|dresses|jumpsuit|romper|overalls)\b',text):return 'full'
-    if re.search(r'半身裙|裤|\b(skirt|skirts|pants|trousers|jeans|shorts|leggings)\b',text):return 'lower'
-    if re.search(r'上衣|衬衫|卫衣|外套|毛衣|开衫|套头衫|\b(top|tops|shirt|blouse|sweater|jacket|coat|hoodie|sweatshirt|pullover|cardigan)\b',text):return 'upper'
+    if re.search(r'半身裙|短裙|长裙|中裙|迷你裙|及膝裙|包臀裙|百褶裙|a字裙|裤|\b(skirt|skirts|pants|trousers|jeans|shorts|leggings)\b',text):return 'lower'
+    if re.search(r'上衣|罩衫|衬衫|卫衣|外套|毛衣|开衫|套头衫|\b(top|tops|tunic|tunics|shirt|blouse|sweater|jacket|coat|hoodie|sweatshirt|pullover|cardigan)\b',text):return 'upper'
     return 'auto'
 
 
@@ -104,12 +104,26 @@ def choose(labels,kind,human=None):
         n=max((1,3),key=lambda k:counts[k-1]) if max(counts[0],counts[2])>=minimum else 2
     else:n={'upper':1,'lower':2,'full':3}[kind]
     mask=labels==n
+    if n==1 and kind=='upper' and human is not None:
+        # Editorial text can be misclassified as a top. Only a real body/cloth
+        # domain can seed the garment, never a detached headline above it.
+        mask &= body_domain(human)
     if (n==1 and kind=='upper' and human is not None and
             mask.sum()<max(50,labels.size*.001)):
         # A tight detail photo can leave the primary parser with only the
         # styling trousers. Use the independent upper-clothes class where the
         # primary parser has no conflicting garment label.
-        support=(labels==0)&(human==4)
+        # A long top over trousers may be classified as a full garment. The
+        # independent upper-clothes class can resolve that ambiguity, while a
+        # conflicting lower-garment label remains excluded.
+        support=np.isin(labels,[0,3])&(human==4)
+        if support.sum()>=max(50,labels.size*.01):mask=support
+    if (n==2 and kind=='lower' and human is not None and
+            mask.sum()<max(50,labels.size*.001)):
+        # A distant wearer can be one full-garment region in U2Net. Recover
+        # only independently identified skirt/trouser pixels, never the coat,
+        # dress, skin or a conflicting primary upper-garment label.
+        support=np.isin(labels,[0,3])&np.isin(human,[5,6])
         if support.sum()>=max(50,labels.size*.01):mask=support
     if mask.sum()<max(50,labels.size*.001):raise ValueError('未识别到该产品的衣服区域，请检查原图是否清晰、主体是否完整')
     if mask.mean()>.95:raise ValueError('自动选区异常覆盖整幅图片，已停止换色')
@@ -404,7 +418,9 @@ def automatic_edge_alpha(source,final,seed,evidence,protection,island):
                     local_selected=selected[y0:y1,x0:x1]
                     local_protection=protection[y0:y1,x0:x1]
                     interior=cv2.erode(local_selected.astype('uint8'),band_kernel)>0
-                    if local_selected.sum()<50 or not np.any(interior&~local_protection):continue
+                    possible=cv2.dilate(local_selected.astype('uint8'),band_kernel)>0
+                    if (local_selected.sum()<50 or not np.any(interior&~local_protection)
+                            or not np.any(~possible|local_protection)):continue
                     values=matte(source.crop((x0,y0,x1,y1)),
                         Image.fromarray(local_selected.astype('uint8')*255),
                         Image.fromarray(local_protection.astype('uint8')*255),radius=2)
@@ -432,13 +448,19 @@ def automatic_evidence(source,semantic,labels,human,selected,protected):
     hair=(human==2)&(distance>12)
     proposal_protection=cv2.erode(((human==2)|skin|accessories).astype('uint8'),np.ones((5,5),'uint8'))>0
     protection=cv2.erode((hair|skin|accessories).astype('uint8'),np.ones((5,5),'uint8'))>0
-    protection|=np.asarray(protected.convert('L'))>0
-    proposal_protection|=np.asarray(protected.convert('L'))>0
+    user_protection=np.asarray(protected.convert('L'))>0
+    protection|=user_protection
+    proposal_protection|=user_protection
+    lower_non_target=(human==4)&(labels!=2) if selected=='lower' else np.zeros(semantic.shape,bool)
+    # A same-colour jacket is still a different garment. When the coarse
+    # parser merged an outfit, colour distance cannot protect its upper half.
+    protection|=lower_non_target
+    proposal_protection|=lower_non_target
     clean=semantic&~protection
     foreground=component_points(clean,limit=1)
     if not foreground:raise ValueError('自动保护后未获得可靠衣料区域，请检查原图')
     if selected=='upper':other=contrast_components((labels==2)&np.isin(human,[5,6]),distance)
-    elif selected=='lower':other=contrast_components((labels==1)&(human==4),distance)
+    elif selected=='lower':other=lower_non_target
     else:other=np.zeros(semantic.shape,bool)
     h,w=semantic.shape
     border=[]
@@ -457,6 +479,8 @@ def automatic_evidence(source,semantic,labels,human,selected,protected):
     if not border and not negatives:raise ValueError('自动识别没有可靠的非衣服区域')
     return {'foreground':foreground,'border':border,'background':negatives,'clean':clean,
             'protected':protection,'proposalProtection':proposal_protection,
+            'userProtection':user_protection,
+            'skinLabels':np.isin(human,[11,12,13,14,15]),
             'hairProtection':cv2.erode((human==2).astype('uint8'),np.ones((5,5),'uint8'))>0,
             'hairLabels':human==2,
             'humanClothing':np.isin(human,{'upper':[4,7],'lower':[5,6,7],'full':[4,5,6,7]}[selected]),
@@ -498,12 +522,120 @@ def sam_proposals(source,evidence,cache):
                                 'selected':receipt,'edgeRefined':True}
 
 
+def chromatic_fabric_recovery(rgb, seed, union, evidence):
+    """Restore colour-distinct omissions connected to verified upper cloth."""
+    import cv2
+
+    clean = evidence['clean']
+    distance = evidence['distance']
+    anchors = seed & clean & (distance < 8)
+    empty = np.zeros(seed.shape, bool)
+    if anchors.sum() < 50:
+        return empty, empty
+    lab = cv2.cvtColor(rgb.astype('float32') / 255, cv2.COLOR_RGB2LAB)
+    chroma = lab[:, :, 1:]
+    samples = chroma[anchors]
+    samples = samples[::max(1, len(samples) // 3000)]
+    axis = np.median(samples, axis=0)
+    strength = np.linalg.norm(axis)
+    if strength < 19:
+        return empty, empty
+    axis /= strength
+    magnitudes = np.linalg.norm(samples, axis=1)
+    agreement = (samples @ axis) >= .96 * magnitudes
+    if agreement.mean() < .85:
+        return empty, empty
+
+    # Body parsing can omit the top of an upper garment when the face and
+    # shoulders are out of frame. Widen that bound only for a tight crop and
+    # only for continuous, same-hue fabric supported by the clothing parser.
+    domain = evidence['bodyDomain']
+    crop_edges = (clean[0], clean[-1], clean[:, 0], clean[:, -1])
+    cropped = clean.mean() >= .25 and max(edge.mean() for edge in crop_edges) >= .35
+    human_cloth = evidence['humanClothing']
+    near_clean = cv2.dilate(clean.astype('uint8'), np.ones((11, 11), 'uint8')) > 0
+    support = ((clean & union) | (human_cloth & near_clean)) & domain
+    if cropped:
+        support |= clean
+    length = np.linalg.norm(chroma, axis=2)
+    projection = chroma[:, :, 0] * axis[0] + chroma[:, :, 1] * axis[1]
+    lightness = lab[:, :, 0]
+    reference_l = lightness[anchors]
+    # Protect actual skin to its visible edge, including a thumbnail. An
+    # arm label on a dark, same-hue fabric shadow does not count as bare skin.
+    skin = evidence['skinLabels'] & (distance > 18) & (
+        (lightness > np.median(reference_l) + 14) | (projection < .82 * length))
+    evidence['chromaticSkinProtection'] = skin
+    matched_edge = (projection >= .975 * length) & (length >= max(13, strength * .42)) & (
+        lightness <= np.quantile(reference_l, .95) + 14)
+    evidence['chromaticEdgeTone'] = matched_edge & ~(skin | evidence['other'] | evidence['bagLabels'] | evidence['userProtection'])
+    reliable_highlight = (clean & human_cloth) & (projection >= .965 * length) & (length >= strength * .75)
+    matching = support & ((distance < 16) | reliable_highlight) & (length >= max(9, strength * .37)) & (projection >= .93 * length)
+    # Deep folds lose both lightness and chroma. The same hue still identifies
+    # them inside the coarse cloth outline, away from its most uncertain edge.
+    interior = cv2.erode(clean.astype('uint8'), np.ones((9, 9), 'uint8')) > 0
+    shadow_lightness = np.quantile(reference_l, .25)
+    shadows = interior & support & ~evidence['hairProtection'] & (lightness < shadow_lightness)
+    matching |= shadows & (length >= 4) & (projection >= .87 * length)
+
+    # A top-edge torso crop may confuse large fabric folds for hair or bare
+    # arms. Inside the closed garment contour, colour still distinguishes dark
+    # folded cloth from neutrals, even if both semantic outputs miss the fold.
+    tightly_framed_torso = cropped and evidence['clothing'][0].mean() >= .35
+    override = empty.copy()
+    if tightly_framed_torso:
+        stroke = max(5, round(max(clean.shape) * .022))
+        coarse = evidence['clothing'].astype('uint8')
+        closed = cv2.morphologyEx(coarse, cv2.MORPH_CLOSE, np.ones((stroke * 2 + 1,) * 2, 'uint8'))
+        inner = cv2.erode(closed, np.ones((13, 13), 'uint8')) > 0
+        override |= inner & (lightness < shadow_lightness) & (length >= 4) & (projection >= .90 * length)
+        # Some folds are labelled background in both coarse outputs. A
+        # matching fold can still be recovered inside the final cloth's
+        # closed silhouette; this evidence alone cannot extend its outer edge.
+        fold_tone = (projection >= .92 * length) & (length >= 4) & (
+            (lightness < shadow_lightness) | (length >= strength * .60))
+        fold_tone |= (lightness < min(5, shadow_lightness)) & (length >= 1.1) & (projection >= .80 * length)
+        evidence['enclosedFoldTone'] = inner & fold_tone & ~(evidence['userProtection'] | evidence['other'] | evidence['bagLabels'] | skin)
+        # Tinted edge pixels of a torso crop can be labelled hair even when
+        # the adjacent source shows a continuous sleeve. Allow only strongly
+        # cloth-coloured pixels to take part in the limited edge completion.
+        evidence['croppedEdgeTone'] = (projection >= .96 * length) & (length >= max(13, strength * .44)) & ~(
+            evidence['userProtection'] | evidence['other'] | evidence['bagLabels'] | skin)
+
+    # A narrow object label can occur on dyed drawstrings. Restrict this
+    # exception to thin, strongly colour-matched strips inside coarse cloth.
+    if cropped:
+        bag = evidence['bagLabels'].astype('uint8')
+        bag_count, bag_parts, bag_stats, _ = cv2.connectedComponentsWithStats(bag)
+        thin = [part for part in range(1, bag_count)
+                if min(bag_stats[part, cv2.CC_STAT_WIDTH], bag_stats[part, cv2.CC_STAT_HEIGHT]) <= min(seed.shape) * .026
+                and max(bag_stats[part, cv2.CC_STAT_WIDTH], bag_stats[part, cv2.CC_STAT_HEIGHT]) <= max(seed.shape) * .09]
+        override |= np.isin(bag_parts, thin) & (evidence['clothing']) & (projection >= .97 * length) & (length >= strength * .62)
+    override &= ~(evidence['userProtection'] | evidence['other'] | skin)
+    matching = (matching & ~evidence['protected']) | override
+    matching &= ~(evidence['other'] | skin)
+    count, parts, stats, _ = cv2.connectedComponentsWithStats(matching.astype('uint8'))
+    anchored = np.bincount(parts[anchors], minlength=count)
+    keep = [part for part in range(1, count)
+            if anchored[part] >= max(8, stats[part, cv2.CC_STAT_AREA] * .025)]
+    retained = np.isin(parts, keep)
+    return retained, retained & override
+
+
 def complete_edges(source,mask,union,evidence,labels,selected,background):
     """Refine source pixels; semantic classes are never forced into foreground."""
     import cv2
     rgb=np.asarray(source.convert('RGB'));seed=np.asarray(mask)>127
     protection=evidence['protected'].copy()
     recovery=np.zeros(seed.shape,bool);island=np.zeros(seed.shape,bool)
+    chromatic=np.zeros(seed.shape,bool)
+    if selected=='upper' and 'humanClothing' in evidence:
+        chromatic,overridden=chromatic_fabric_recovery(rgb,seed,union,evidence)
+        protection|=evidence.get('chromaticSkinProtection',False)
+        if chromatic.any():
+            protection[overridden]=False
+            evidence['bodyDomain'] |= chromatic
+            evidence['chromaticRecoveryPixels']=int((chromatic&~seed).sum())
     if 'hairProtection' in evidence:
         # Relax a same-colour false hair patch only where the best SAM clothing
         # object also supports it. A weaker alternative may include real dark
@@ -513,7 +645,7 @@ def complete_edges(source,mask,union,evidence,labels,selected,background):
             recovery=near_hair_recovery(seed,evidence.get('hairLabels',evidence['hairProtection']),
                                         evidence['distance'],evidence['clothing'],source)
             supported|=recovery
-        protection|=evidence['hairProtection']&~supported
+        protection|=evidence['hairProtection']&~(supported|chromatic)
     if 'humanClothing' in evidence and 'clothing' in evidence:
         fabric,fibres=small_supported_fabric(seed,evidence['humanClothing'],evidence['distance'],
                                              evidence['clothing'],source)
@@ -527,18 +659,22 @@ def complete_edges(source,mask,union,evidence,labels,selected,background):
     # union supplies only probable, same-fabric pixels, never certain pixels.
     distance=evidence['distance'];clean=evidence['clean']
     gc[(seed&(distance<24))|(union&(distance<12))]=cv2.GC_PR_FGD
-    gc[recovery]=cv2.GC_PR_FGD
+    gc[recovery|chromatic]=cv2.GC_PR_FGD
     closed=cv2.morphologyEx(seed.astype('uint8'),cv2.MORPH_CLOSE,np.ones((21,21),'uint8'))
     # A parser and SAM hole filling can both call the chair seen through an
     # elbow gap clothing. Semantic agreement cannot turn a different-colour
     # interior opening into certain foreground.
     certain=(cv2.erode(closed,np.ones((17,17),'uint8'))>0)&(distance<12)
     certain|=cv2.erode(recovery.astype('uint8'),np.ones((3,3),'uint8'))>0
+    certain|=cv2.erode(chromatic.astype('uint8'),np.ones((5,5),'uint8'))>0
     gc[certain]=cv2.GC_FGD;gc[protection|evidence['other']]=cv2.GC_BGD
-    for x,y in background:cv2.circle(gc,(x,y),3,cv2.GC_BGD,-1)
+    for x,y in background:
+        if not chromatic[y,x]:cv2.circle(gc,(x,y),3,cv2.GC_BGD,-1)
     for x,y in evidence['foreground']:cv2.circle(gc,(x,y),2,cv2.GC_FGD,-1)
     gc[protection]=cv2.GC_BGD
     if 'bodyDomain' in evidence:gc[~evidence['bodyDomain']]=cv2.GC_BGD
+    if not np.isin(gc,[cv2.GC_FGD,cv2.GC_PR_FGD]).any() or not np.isin(gc,[cv2.GC_BGD,cv2.GC_PR_BGD]).any():
+        raise ValueError('自动识别没有同时获得可靠前景与背景，已停止换色，请核对原选区')
     cv2.setRNGSeed(0);cv2.grabCut(rgb.copy(),gc,None,np.zeros((1,65)),np.zeros((1,65)),3,cv2.GC_INIT_WITH_MASK)
     final=np.isin(gc,[cv2.GC_FGD,cv2.GC_PR_FGD])
     count,parts,stats,_=cv2.connectedComponentsWithStats(final.astype('uint8'))
@@ -554,9 +690,36 @@ def complete_edges(source,mask,union,evidence,labels,selected,background):
             keep.append(index)
     final=np.isin(parts,keep);final[protection]=False
     if 'bodyDomain' in evidence:final[~evidence['bodyDomain']]=False
+    crop_edge=np.zeros(seed.shape,bool)
+    if 'chromaticEdgeTone' in evidence:
+        kernel=np.ones((9,9),'uint8')
+        near=cv2.dilate(final.astype('uint8'),kernel)>0
+        edge=near&~final&evidence['chromaticEdgeTone']&evidence['bodyDomain']
+        edge&=evidence['clothing']|evidence['humanClothing']|~evidence['hairProtection']
+        final|=edge;protection[edge]=False;island|=edge
+    if 'croppedEdgeTone' in evidence:
+        contour_kernel=np.ones((13,13),'uint8')
+        close_cloth=cv2.dilate(final.astype('uint8'),contour_kernel)>0
+        inside_cloth=cv2.erode(final.astype('uint8'),contour_kernel)>0
+        crop_edge=close_cloth&~inside_cloth&evidence['croppedEdgeTone']
+        final|=crop_edge;protection[crop_edge]=False;evidence['bodyDomain']|=crop_edge
+        island|=crop_edge
+    if 'enclosedFoldTone' in evidence:
+        radius=max(5,round(max(seed.shape)*.027))
+        closed=cv2.morphologyEx(final.astype('uint8'),cv2.MORPH_CLOSE,np.ones((radius*2+1,)*2,'uint8'))
+        inside=cv2.erode(closed,np.ones((15,15),'uint8'))>0
+        folds=inside&evidence['enclosedFoldTone']&~final
+        final|=folds;protection[folds]=False;evidence['bodyDomain']|=folds
+        island|=folds
+        evidence['chromaticRecoveryPixels']=evidence.get('chromaticRecoveryPixels',0)+int(folds.sum())
     if final.sum()<max(50,final.size*.001) or final.mean()>.95:
         raise ValueError('自动识别边界异常，已停止换色，请查看原图和任务记录')
-    return automatic_edge_alpha(source,final,seed,evidence,protection,island)
+    alpha=automatic_edge_alpha(source,final,seed,evidence,protection,island|(chromatic&~seed))
+    if crop_edge.any():
+        values=np.asarray(alpha).copy()
+        values[crop_edge]=np.maximum(values[crop_edge],204)
+        alpha=Image.fromarray(values)
+    return alpha
 
 
 def identify(source,protected,cache,kind='auto',engine=None,human_engine=None):
@@ -574,7 +737,10 @@ def identify(source,protected,cache,kind='auto',engine=None,human_engine=None):
         if human.shape!=labels.shape or not np.isin(human,np.arange(18)).all():
             raise ValueError('人体部位识别结果无效')
         semantic,selected,counts=choose(labels,kind,human)
-        upper_fallback=selected=='upper' and kind=='upper' and counts[0]<max(50,labels.size*.001)
+        upper_fallback=(selected=='upper' and kind=='upper' and
+                        not np.array_equal(semantic,(labels==1)&body_domain(human)))
+        lower_fallback=(selected=='lower' and kind=='lower' and
+                        not np.array_equal(semantic,labels==2))
         evidence=automatic_evidence(source,semantic,labels,human,selected,protected)
         if upper_fallback:
             points=cropped_upper_points(evidence['clean'])
@@ -583,13 +749,18 @@ def identify(source,protected,cache,kind='auto',engine=None,human_engine=None):
         mask,union,background,detail=sam_proposals(source,evidence,cache)
         mask=complete_edges(source,mask,union,evidence,labels,selected,background)
         detail['automaticBoundary']=evidence.get('edgeRefinement',{})
+        detail['automaticBoundary']['chromaticRecoveryPixels']=evidence.get('chromaticRecoveryPixels',0)
         foreground=evidence['foreground']
+    from image_selection import protect as semantic_protect
+    mask,semantic_receipt=semantic_protect(mask,human,protected)
+    detail['finalSemanticProtection']=semantic_receipt
     if mask.size!=original_size:mask=mask.resize(original_size,Image.Resampling.NEAREST)
     if original_alpha is not None:
         arr=np.asarray(mask).copy();arr[np.asarray(original_alpha)==0]=0;mask=Image.fromarray(arr)
     return mask,{'type':'automatic-clothing','engine':'U2Net clothes + SCHP ATR + MobileSAM + GrabCut',
         'version':VERSION,'modelRevision':'rembg-v0.0.0-u2net-cloth-seg','humanModelRevision':'schp-atr-18-61f4ff3-int8',
         'category':selected,'classPixels':counts,
-        'semanticSource':'schp_upper_clothes' if upper_fallback else 'u2net_clothes',
+        'semanticSource':('schp_upper_clothes' if upper_fallback else
+                          'schp_lower_clothes' if lower_fallback else 'u2net_clothes'),
         'automatic':True,'userPointsRequired':False,'generatedForegroundPoints':foreground,'generatedBackgroundPoints':background,
         'seconds':round(time.monotonic()-start,3),'selection':detail,'imageGenerationSubmitted':False,'humanReviewed':False}

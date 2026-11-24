@@ -6,6 +6,34 @@ import visual_studio
 
 
 class StoryboardReferenceTests(unittest.TestCase):
+    def test_current_competitor_chart_wins_over_old_supplier_project(self):
+        current={'sourceKind':'competitor','sourcePage':'https://example.test/current',
+                 'units':'in','columns':['Size','Bust'],'rows':[['S','38.5']]}
+        old={**current,'sourceKind':'supplier','sourcePage':'https://example.test/old',
+             'units':'cm','rows':[['S','100']]}
+        self.assertEqual(ivyea_pipeline.project_size_chart({'competitorSizeEvidence':current},
+            [{'sizeEvidence':old}]),current)
+        self.assertIsNone(ivyea_pipeline.project_size_chart({'competitorSizeEvidence':{}},
+            [{'sizeEvidence':old}]))
+        self.assertEqual(ivyea_pipeline.project_size_chart({},[{'sizeEvidence':old}]),old)
+
+    def test_blocked_card_never_falls_back_to_valid_primary_photo(self):
+        import studio_bridge
+        project=self.project()
+        project.update(id='blocked-project',productId='P',confirmed=False,plan={'warnings':[]})
+        card=project['uiPlan']['images'][0]
+        card.update(production_method='blocked',missing_evidence='No matching rear photo')
+        self.assertEqual(ivyea_pipeline.shot_source(project,0),
+            (None,None,'第 1 张分镜已标记不可制作：No matching rear photo'))
+        panel=studio_bridge.native(project,[])
+        self.assertFalse(panel['quality']['ready'])
+        self.assertIn('No matching rear photo',panel['images'][0]['sourceIssue'])
+        for presence in ('hero','absent'):
+            card['product_presence']=presence
+            for allow in (False,True):
+                with self.assertRaisesRegex(ValueError,'不可制作'):
+                    visual_studio.slot_references(project,0,allow_missing_evidence=allow)
+
     def test_set_review_supplies_only_verified_unchanged_alternate_sources_once(self):
         import studio_bridge
         project=self.project();project['galleryDirection']='apparel_v2_no_filler'

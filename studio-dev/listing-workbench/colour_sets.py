@@ -17,6 +17,7 @@ import variant_colours
 import colour_quality
 import colour_binding
 import logging
+import image_composition
 
 DB=app_paths.DATA/'colour_sets.sqlite3'
 LOCK=threading.RLock()
@@ -281,6 +282,18 @@ def recolor_prompt(color, *, variant=False):
 
 TEXT_RULE='Preserve artwork wording and typography except: replace an explicit old featured garment colour name with the target colour name; remove an obsolete colour/shade adjective describing hardware if the reference proves that hardware changes (for example "Dark buttons" becomes "Buttons"). Do not replace a hardware adjective with the garment colour name. Match visible buttons to the target reference, independently of fabric colour. Add no new claims. Flag stale colour descriptions. Existing texture or patterns already visible in the locked master are not new output defects; compare the same region directly.'
 
+def prepared_artwork_context(s,item):
+ prepared=s.get('preparedGallery') or {};proof=(item.get('localCorrection') or {}).get('provenance') or {}
+ if not prepared or proof.get('masterId')!=s.get('masterId') or proof.get('referenceSha256')!=prepared.get('referenceSha256'):return {}
+ return {'method':proof.get('method'),'sourceCropPixels':proof.get('cropPixels'),
+         'targetReference':s['reference'],'actualReferenceSha256':prepared['referenceSha256'],
+         'outsideChangedPixels':proof.get('outsideChangedPixels'),'humanReviewed':False,
+         'instruction':('This source-layout candidate uses the verified target-colour product photograph and recorded crop; '
+                        'the photographed presentation/crop may differ from the master. Compare product construction to both '
+                        'the original and actual target reference. Do not invent or waive a structural, factual, material, '
+                        'colour or text mismatch. A native-repair composite must retain the original wearer/occlusion geometry. '
+                        'Judge these current delivered pixels; upstream raw reviews are history and grant no approval.')}
+
 def variant_artwork_instruction(s,item):
  """Bind wording to this slot instead of asking for colour words everywhere."""
  project=visual.get_project(s.get('storyboardProjectId') or s['masterId'])
@@ -304,6 +317,10 @@ def review_inputs(s,item):
  refs=[visual.encode_reference(item['sourceUpload']),visual.encode_reference(s['reference']),visual.encode_reference(item['image']) if item['image'].startswith('/uploads/') else item['image']]
  evidence={}
  if not item.get('localCorrection'):return refs,evidence
+ if item.get('sharedSizeChart'):
+  from shared_size_chart import verify_reuse
+  project=visual.get_project(s.get('storyboardProjectId') or s['masterId'])
+  evidence.update(verify_reuse(item,image_provider.local_image(item['sourceUpload']),image_provider.local_image(item['image']),project))
  try:
   import io,base64
   from PIL import Image,ImageDraw,ImageChops
@@ -314,10 +331,18 @@ def review_inputs(s,item):
   evidence['changedBounds']=ImageChops.difference(src,out).getbbox()
   project=visual.get_project(s.get('storyboardProjectId') or s['masterId'])
   cards=(project.get('uiPlan') or {}).get('images') or []
-  if item['slot']<len(cards) and cards[item['slot']].get('product_presence')=='absent':
-   evidence.update(contentOnlyInformationCard=True,unchangedPixels=evidence['changedBounds'] is None,
-                   supplierVerifiedFacts=project.get('productFacts') or {},
-                   plannedCopy=studio_bridge.artwork_copy(cards[item['slot']]))
+  if item['slot']<len(cards):
+   card=cards[item['slot']]
+   evidence['plannedCopy']=studio_bridge.artwork_copy(card)
+   master_facts=project.get('productFacts') or {}
+   if isinstance(master_facts,dict) and master_facts.get('material'):
+    evidence['masterMaterialFact']=master_facts['material']
+   if card.get('size_chart') is True and item.get('sharedSizeChart'):
+    from shared_size_chart import verify_reuse
+    evidence.update(verify_reuse(item,source_raw,result_raw,project))
+   if card.get('product_presence')=='absent':
+    evidence.update(contentOnlyInformationCard=True,unchangedPixels=evidence['changedBounds'] is None,
+                    supplierVerifiedFacts=master_facts)
   # Include unchanged neighbouring pixels as evidence for occlusions and edges.
   # Neither product position nor storyboard slot determines these rectangles.
   changed=evidence['changedBounds'] or (0,0,src.width,src.height)
@@ -353,6 +378,12 @@ def review_inputs(s,item):
    refs.append('data:image/jpeg;base64,'+base64.b64encode(raw.getvalue()).decode())
  except Exception as e:evidence['comparisonUnavailable']=str(e)[:160]
  return refs,evidence
+
+def composition_review(s,item):
+ project=visual.get_project(s.get('storyboardProjectId') or s['masterId'])
+ raw=image_provider.local_image(item['image']) if item['image'].startswith('/uploads/') else __import__('generated_gallery').download(item['image'])
+ return image_composition.for_project(raw,project,item['slot'])
+
 
 def work(s):
  if not s.get('validated'):
@@ -411,8 +442,14 @@ def work(s):
    if job['status']!='completed':return
    item.update(image=job['images'][0],status='reviewing');s['status']='reviewing';save(s)
   if item['status']=='reviewing':
-   refs,evidence=review_inputs(s,item)
-   qc=colour_quality.normalise(visual.model_json(colour_quality.INSTRUCTION+'\n'+TEXT_RULE,{'qualityPolicy':colour_quality.POLICY,'masterColor':s.get('masterColor'),'targetColor':s['color'],'colourOnlyDraft':s.get('colorOnlyDraft',False),'referenceEvidenceType':s.get('referenceEvidenceType','supplier_product_image'),'materialRule':'Preserve master textile structure; minor contrast/softness differences alone are cosmetic','localPixelEvidence':evidence},refs))
+   composition=composition_review(s,item)
+   if not composition['pass']:
+    qc=colour_quality.normalise({'decision':'fail','blockingIssues':[i['message'] for i in composition['issues']],'warnings':[]})
+   else:
+    refs,evidence=review_inputs(s,item)
+    from shared_size_chart import REVIEW_RULE
+    qc=colour_quality.normalise(visual.model_json(colour_quality.INSTRUCTION+'\n'+TEXT_RULE+('\n'+REVIEW_RULE if evidence.get('sharedSizeChart') else ''),{'qualityPolicy':colour_quality.POLICY,'masterColor':s.get('masterColor'),'targetColor':s['color'],'colourOnlyDraft':s.get('colorOnlyDraft',False),'referenceEvidenceType':s.get('referenceEvidenceType','supplier_product_image'),'materialRule':'Preserve master textile structure; minor contrast/softness differences alone are cosmetic','localPixelEvidence':evidence,'preparedArtwork':prepared_artwork_context(s,item)},refs))
+   qc['composition']=composition
    item['qc']=qc;item['qcReference']=s['reference'];item['status']='awaiting_manual' if qc['pass'] and not qc['issues'] else 'needs_revision';save(s)
    if item['status']=='needs_revision':
     if item.get('localCorrection') and not any(i['status'] in ('queued','submitting','generating') for i in s['items']):
@@ -599,13 +636,11 @@ def start_worker():
   if any(i['status']=='submitting' for i in s['items']):s.update(status='needs_attention',error='上次提交状态不明，请核对服务商任务，未自动重提');save(s)
  threading.Thread(target=loop,daemon=True).start()
 
-def image_bytes(sid,slot,*,local_only=False):
+def image_bytes(sid,slot):
  s=get(sid);item=next((i for i in s['items'] if i['slot']==slot),None)
  if not item or not item.get('image'):raise ValueError('该换色图片尚未完成')
  # Reuse the existing provider-image download protections and local cache via a private run.
  rid=uuid.uuid5(uuid.NAMESPACE_URL,'junfei-colour:'+sid+':'+str(slot)+':'+item['image']).hex
- if local_only:
-  return studio_bridge.result_bytes({'id':rid,'productId':s['productId'],'image':item['image']},local_only=True)
  try:visual.get_run(rid)
  except ValueError:visual.save_run({'id':rid,'projectId':'colour:'+sid,'productId':s['productId'],'slot':slot,'image':item['image'],'status':'colour_cache','mode':'colour_cache','qc':[]})
  return studio_bridge.result_image(rid)

@@ -81,6 +81,21 @@ class PluginTests(unittest.TestCase):
         self.assertTrue(result['sellercentralConfirmed'])
         self.assertEqual(result['loginRecovery'],recovery)
 
+    def test_protected_uk_entry_detects_mfa_without_polling_or_opening_plugin(self):
+        challenge={'ok':True,'data':{'url':'https://sellercentral.amazon.co.uk/ap/mfa?arb=example',
+                   'targetId':'actual','content':'两步验证'}}
+        with patch.object(plugin,'run',side_effect=[self.resolved,self.page,{'ok':True},challenge]) as run, \
+                patch.object(plugin.time,'sleep') as sleep, \
+                patch.object(plugin.ziniao_mfa,'submit_autofilled',return_value={'status':'refresh_required'}) as mfa:
+            with self.assertRaises(plugin.SiteIdentityError) as error:
+                plugin.ensure_site('cli',store_id='123',store_name='授权店铺',market='UK',seller='Example Store')
+        self.assertEqual(error.exception.error_type,'seller_mfa_required')
+        self.assertIn('https://sellercentral.amazon.co.uk/amazonsell/business?ref=homepage_direct_serve_ngs',
+                      run.call_args_list[2].args)
+        self.assertEqual(run.call_count,4)
+        mfa.assert_called_once()
+        sleep.assert_not_called()
+
     def test_coordinate_free_submission_does_not_claim_login_or_expose_credentials(self):
         response={'ok':True,'data':{'data':{'result':'{"submitted":true,"method":"observed_form_requestSubmit","credentialsRead":false}'}}}
         with patch.object(plugin,'run',return_value=response) as run:

@@ -1,7 +1,6 @@
 """Account lifecycle/FIFO recovery tests; no worker process or browser is launched."""
 from contextlib import closing
 import json
-import secrets
 from pathlib import Path
 import tempfile
 import threading
@@ -121,7 +120,7 @@ class SupplierLifecycleTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT state FROM captures WHERE id=?',(first['id'],)).fetchone()[0],'cancelled')
             self.assertEqual(c.execute('SELECT state FROM captures WHERE scope=? AND url=?',(self.scope(3),OTHER)).fetchone()[0],'archived')
         with patch.object(accounts,'password_hash',return_value='fixture hash'):
-            accounts.register({'username':'new-user','password':secrets.token_urlsafe(24)})
+            accounts.register({'username':'new-user','password':'fixture-pass-1234'})
         self.assertEqual(accounts.users()['users'][-1]['id'],4)
         q.browser_capture.assert_not_called()
 
@@ -130,7 +129,7 @@ class SupplierLifecycleTests(unittest.TestCase):
         accounts.update({'id':3,'action':'delete'},self.actor)
         accounts.update({'id':3,'action':'purge','confirmUsername':'user3'},self.actor)
         with patch.object(accounts,'password_hash',return_value='fixture hash'):
-            accounts.register({'username':'next-user','password':secrets.token_urlsafe(24)})
+            accounts.register({'username':'next-user','password':'fixture-pass-1234'})
         self.assertEqual(accounts.users()['users'][-1]['id'],4)
 
     def test_orphaned_queued_job_is_cancelled_but_orphaned_active_identity_is_preserved(self):

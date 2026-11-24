@@ -1,5 +1,6 @@
 const fs=await import('node:fs/promises');
-export const out='C:/Users/Administrator/Documents/ChatGPT/亚马逊Listing编辑作图/outputs/cyclic30-A1CL1EHU54VFT9-20261104';
+export const out=process.env.JUNFEI_CYCLIC_OUTPUT;
+if(!out)throw new Error('Set JUNFEI_CYCLIC_OUTPUT to this task output directory');
 export async function save(name,data){await fs.writeFile(out+'/'+name,JSON.stringify(data,null,2));}
 export async function cards(p,limit=16){
  const asins=await p.evaluate(n=>[...document.querySelectorAll('[data-component-type="s-search-result"][data-asin]')].slice(0,n).map(c=>c.dataset.asin),limit);

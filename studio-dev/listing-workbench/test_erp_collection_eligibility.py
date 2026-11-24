@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from PIL import Image
+from PIL import Image, ImageDraw
 import erp_collection as erp
 
 
@@ -57,9 +57,25 @@ class EligibilityTests(unittest.TestCase):
         self.product['sourceImport']['amazon']['variants'][0].pop('size_name')
         self.assertEqual([row[0] for row in erp.eligible_variant_rows(self.product)],['P-Red-M'])
 
+    def test_apparel_requires_current_reviewed_chart_for_all_eligible_sizes(self):
+        self.product.update(cat='服装')
+        chart={'sourceKind':'supplier','sourcePage':self.product['sourceUrl'],'units':'cm',
+               'columns':['Size','Bust','Length'],'rows':[['M','96','62']]}
+        card={'size_chart':True,'_runId':'chart-run','render_qa':{'ready':True,'technical':{'sha256':'a'*64}}}
+        plan={'_sizeChartEvidence':chart,'images':[{} for _ in range(6)]+[card]}
+        with self.assertRaisesRegex(ValueError,'已核实同款竞品的尺码表'):
+            erp.required_size_chart(self.product,{},['M'])
+        with self.assertRaisesRegex(ValueError,'覆盖所有'):
+            erp.required_size_chart(self.product,plan,['M','XL'])
+        with self.assertRaisesRegex(ValueError,'第7张必须'):
+            erp.required_size_chart(self.product,{**plan,'images':[{}]*7},['M'])
+        self.assertEqual(erp.required_size_chart(self.product,plan,['Medium']),'a'*64)
+
     def test_finished_snapshot_omits_same_color_excluded_size_and_other_color(self):
         buffer=io.BytesIO()
-        Image.new('RGB',(1600,1600),'white').save(buffer,format='PNG')
+        image=Image.new('RGB',(1600,1600),'#9dc5d9')
+        ImageDraw.Draw(image).rectangle((80,80,1520,1520),fill='blue')
+        image.save(buffer,format='PNG')
         images=[(buffer.getvalue(),{'slot':slot,'mime':'image/png','status':'awaiting_manual',
                                    'humanReviewed':False}) for slot in range(7)]
         groups={'red':{'key':'red','color':'Red','ready':True,
@@ -72,18 +88,7 @@ class EligibilityTests(unittest.TestCase):
                 patch.object(erp.generated_gallery,'export_images',return_value=images), \
                 patch.object(erp.colour_sets,'list_sets',return_value={'sets':[]}), \
                 patch.object(erp.inputs,'transport',return_value={}):
-            packet=erp.preflight(2,self.product,self.listing,self.destination,None)
-            erp.generated_gallery.export_images.assert_called_with(self.product,'current',local_only=True)
-            self.assertFalse((self.root/'media').exists())
             snapshot=erp.finished_snapshot(2,self.product,self.listing,self.destination,self.root/'media')
-            self.assertEqual(erp.review_digest(packet),erp.review_digest(erp.review_packet(snapshot)))
-            images=packet['variants']['P-Red-M']['images']
-            self.assertEqual([image['slot'] for image in images],list(range(7)))
-            changed=copy.deepcopy(packet)
-            changed['variants']['P-Red-M']['price']='99'
-            self.assertNotEqual(erp.review_digest(packet),erp.review_digest(changed))
-            images.reverse()
-            self.assertNotEqual(erp.review_digest(packet),erp.review_digest(erp.review_packet(snapshot)))
         self.assertEqual([row['sku'] for row in snapshot['goodsItems']],['P-Red-M'])
         self.assertEqual(snapshot['goodsItems'][0]['sourceAsin'],'B000000002')
         self.assertEqual(snapshot['goodsItems'][0]['imageIndices'],list(range(7)))

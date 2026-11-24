@@ -3,6 +3,10 @@ from pathlib import Path
 from unittest.mock import patch
 import delivery_export as d
 class ExportTest(unittest.TestCase):
+ def setUp(self):
+  # These archive/CSV contract tests deliberately use sentinel bytes, not rasters.
+  gate=patch.object(d.image_composition,'require',return_value={'pass':True})
+  gate.start();self.addCleanup(gate.stop)
  def test_aplus_is_separate_and_never_shifts_gallery_numbering(self):
   image=lambda rid:{'_runId':rid,'final_url':'url','_status':'approved','human_reviewed':True,'render_qa':{'ready':True}}
   view={'sets':{'aplus':{'images':[image('aplus')]},'gallery':{'images':[image('main'),image('detail')]}}}

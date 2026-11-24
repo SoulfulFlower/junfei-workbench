@@ -49,6 +49,8 @@ def inventory(product_id):
         ('visual_studio.sqlite3', 'visual',
          'SELECT r.body FROM runs r JOIN projects p ON p.id=r.project_id WHERE p.product_id=?'),
         ('colour_sets.sqlite3', 'colour', 'SELECT body FROM sets WHERE product_id=?'),
+        ('image_engine.sqlite3', 'image_engine', 'SELECT body FROM tasks WHERE product_id=?'),
+        ('image_tools.sqlite3', 'image_tool', 'SELECT body FROM tasks'),
         ('image_jobs.sqlite3', 'submission', 'SELECT body FROM submission_attempts WHERE product_id=?'),
         ('image_jobs.sqlite3', 'image_job', 'SELECT body FROM jobs'),
     ]
@@ -58,18 +60,28 @@ def inventory(product_id):
             continue
         try:
             with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as c:
-                rows = c.execute(query, () if kind == 'image_job' else (product_id,)).fetchall()
+                rows = c.execute(query, () if kind in ('image_job', 'image_tool') else (product_id,)).fetchall()
             for (raw,) in rows:
                 row = json.loads(raw)
                 if not isinstance(row, dict):
                     raise ValueError('invalid journal')
-                if kind == 'image_job' and row.get('productId') != product_id:
+                if kind in ('image_job', 'image_tool') and row.get('productId') != product_id:
                     continue
+                # A failed tool can still contain an unknown paid/vision intent.
+                # Inspect saved metadata only; never import its worker or poll it.
+                unresolved = False
+                if kind == 'image_tool':
+                    unresolved = (row.get('status') == 'interrupted'
+                                  or (row.get('failureReceipt') or {}).get('state') == 'unknown'
+                                  or (row.get('result') or {}).get('status') == 'unverified'
+                                  or any(item.get('status') in ('pending', 'unknown')
+                                         for item in row.get('modelIntents', [])))
                 records.append({'kind': kind, 'id': str(row.get('id', '')),
                                 'status': str(row.get('status') or row.get('state') or 'unknown'),
+                                'unresolved': unresolved,
                                 'slot': row.get('slot') if type(row.get('slot')) is int else str(row.get('slot'))[:200] if isinstance(row.get('slot'), str) else None,
                                 'externalId': str(row.get('externalId') or '') if kind == 'submission' else ''})
-        except (sqlite3.Error, ValueError, TypeError):
+        except (sqlite3.Error, ValueError, TypeError, AttributeError):
             issues.append(kind + ' 图片历史无法完整读取，须先核对，不能按无任务处理')
     safe = {'completed', 'approved', 'awaiting_manual', 'needs_revision', 'failed', 'cancelled', 'saved'}
     jobs = {row['id']: row for row in records if row['kind'] == 'image_job'}
@@ -79,7 +91,7 @@ def inventory(product_id):
             job = jobs.get(row['externalId'])
             if not job or job['status'] not in ('completed', 'failed', 'cancelled'):
                 pending.append(row)
-        elif row['status'] not in safe:
+        elif row.get('unresolved') or row['status'] not in safe:
             pending.append(row)
     if pending:
         issues.append('已有进行中或结果未知的图片记录，须核对原任务，不能重复提交')

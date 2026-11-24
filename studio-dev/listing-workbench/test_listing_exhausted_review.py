@@ -121,6 +121,85 @@ class ExhaustedReviewTests(unittest.TestCase):
         self.assertIn(self.frozen['lastIssues'][0]['quote'],self.frozen['result']['bullets'].splitlines()[2])
         self.assertEqual(len(self.frozen['result']['translations']['bullets'].splitlines()),5)
 
+    def test_explicit_target_vector_rejects_ambiguous_or_non_bullet_values(self):
+        for targets in (None, [], [True], [0], [6], [3,2], [2,2,3], '2,3,5'):
+            with self.assertRaises(ValueError):provider.exhausted_targets(targets)
+        self.assertEqual(provider.exhausted_targets([2,3,5]),[2,3,5])
+        self.model.assert_not_called()
+
+    def multi_scope(self):
+        # Synthetic frozen reconstruction for transport/state-machine tests.
+        # Strict nine-response reconstruction is tested independently above.
+        frozen=copy.deepcopy(self.frozen);frozen['targetBullets']=[2,3,5]
+        lines=frozen['result']['bullets'].splitlines();issue=frozen['lastIssues'][0]
+        frozen['lastIssues']=[{**issue,'bullet':2,'quote':lines[1],'reason':'Isolated heading2 needs editing'},
+                             issue,
+                             {**issue,'bullet':5,'quote':lines[4],'reason':'Isolated heading5 needs editing'}]
+        frozen['repairInstruction']='Repair only explicitly frozen bullets2,3,5; all other fields immutable.'
+        self.job['error']='五点未通过检查，已达到自动返修次数，未覆盖现有文案：'+ ';'.join(
+            finding['reason'] for finding in frozen['lastIssues'])+'；初稿回执 '+self.refs[0]['id']
+        with jobs.database() as db:jobs.save(db,self.job)
+        self.request['targetBullets']=[2,3,5]
+        values=provider.response_json(self.repaired());revisions=values['revisions']
+        for number in (2,5):
+            line=lines[number-1];tail=line.split(']',1)[1]
+            heading='[Updated Buttons]' if number == 2 else '[Updated Styling]'
+            revisions.append({'bullet':number,'text':heading+tail,
+                              'translation':'[主题修订] 隔离测试翻译。'})
+        values['revisions']=sorted(revisions,key=lambda row:row['bullet'])
+        return frozen,values
+
+    def test_multiple_targets_preserve_every_untargeted_field_and_translation(self):
+        frozen,values=self.multi_scope();result=copy.deepcopy(frozen['result'])
+        result['bullets'],zh=provider.merge_bullet_revisions(result['bullets'],
+            result['translations']['bullets'],[2,3,5],values['revisions'],require_translation=True)
+        result['translations']['bullets']=zh
+        provider._assert_exhausted_fields_fixed(result,frozen)
+        for key in ('title','highlights','description','terms'):
+            altered=copy.deepcopy(result);altered[key]+=' changed'
+            with self.assertRaises(ValueError):provider._assert_exhausted_fields_fixed(altered,frozen)
+        for index in (0,3):
+            altered=copy.deepcopy(result);lines=altered['bullets'].splitlines();lines[index]+=' changed'
+            altered['bullets']='\n'.join(lines)
+            with self.assertRaises(ValueError):provider._assert_exhausted_fields_fixed(altered,frozen)
+
+    def test_multiple_targets_share_one_repair_one_review_and_one_original_job(self):
+        frozen,answer=self.multi_scope()
+        self.model.side_effect=[raw(answer,'isolated-multi-repair'),raw({'issues':[]},'isolated-multi-review')]
+        with patch.object(provider,'reconstruct_exhausted_listing',return_value=frozen):final=self.execute()
+        self.assertEqual(final['status'],'applied');self.assertEqual(self.model.call_count,2)
+        saved=self.state()[1]['copy'][self.pid+'-US'];old=frozen['result']
+        for index in (0,3):self.assertEqual(saved['bullets'].splitlines()[index],old['bullets'].splitlines()[index])
+        for index in (1,2,4):self.assertNotEqual(saved['bullets'].splitlines()[index],old['bullets'].splitlines()[index])
+        scope=self.private()['exhaustedContinuation']
+        self.assertEqual(scope['limits'],{'targetBullets':[2,3,5],'repairCalls':1,'freshReviewCalls':1,'initialCalls':0,'polishCalls':0})
+        self.assertEqual(json.loads(self.model.call_args_list[0].args[0]['messages'][1]['content'])['rewrite_bullets'],[2,3,5])
+        self.assertEqual(json.loads(self.model.call_args_list[1].args[0]['messages'][1]['content'])['review_bullets'],[1,2,3,4,5])
+        self.assertTrue(jobs.continue_exhausted_review(2,self.request)['reused'])
+        self.assertEqual(self.model.call_count,2);self.assert_originals_and_others()
+
+    def test_multiple_targets_noop_for_one_target_stops_before_fresh_review(self):
+        frozen,answer=self.multi_scope();answer['revisions'][0]['text']=frozen['result']['bullets'].splitlines()[1]
+        self.model.side_effect=[raw(answer,'isolated-multi-noop')]
+        with patch.object(provider,'reconstruct_exhausted_listing',return_value=frozen):final=self.execute()
+        self.assertEqual(final['status'],'needs_review');self.assertEqual(self.model.call_count,1)
+        self.assertNotIn(self.pid+'-US',self.state()[1]['copy'])
+
+    def test_multiple_targets_cannot_add_an_unrequested_bullet(self):
+        frozen,answer=self.multi_scope();answer['revisions'].append({'bullet':4,'text':'Forbidden4','translation':'禁止'})
+        self.model.side_effect=[raw(answer,'isolated-multi-extra')]
+        with patch.object(provider,'reconstruct_exhausted_listing',return_value=frozen):final=self.execute()
+        self.assertEqual(final['status'],'needs_review');self.assertEqual(self.model.call_count,1)
+        self.assertNotIn(self.pid+'-US',self.state()[1]['copy'])
+
+    def test_multiple_targets_full_review_can_reject_an_untargeted_bullet_without_loop(self):
+        frozen,answer=self.multi_scope();finding={**frozen['lastIssues'][0],'bullet':1,
+            'quote':frozen['result']['bullets'].splitlines()[0],'reason':'Isolated fresh full-review issue'}
+        self.model.side_effect=[raw(answer,'isolated-multi-repair'),raw({'issues':[finding]},'isolated-multi-failed-review')]
+        with patch.object(provider,'reconstruct_exhausted_listing',return_value=frozen):final=self.execute()
+        self.assertEqual(final['status'],'needs_review');self.assertEqual(self.model.call_count,2)
+        self.assertNotIn(self.pid+'-US',self.state()[1]['copy'])
+
     def test_keyword_guard_allows_new_target_hit_while_preserving_original_positions(self):
         plan=[{'phrase':'collared cardigan','placement':'bullets'}]
         before=['[Collar] A collared cardigan.','[Buttons] Five buttons.','[Sleeves] Long sleeves.',

@@ -14,6 +14,10 @@ from storyboard_variety import is_scene
 import visual_studio as visual
 import image_provider
 import image_quality
+import image_composition
+
+
+SIZE_CHART_PREVIEW_BOX = (1510, 110, 1880, 490)
 
 
 def crop_source(raw, box):
@@ -70,6 +74,49 @@ def compose(raw,index,headline,caption,preserve_full_source=False):
         canvas.alpha_composite(layer,((2000-layer.width)//2,2000-110-layer.height))
     output=io.BytesIO();canvas.convert('RGB').save(output,'PNG');return output.getvalue()
 
+
+def compose_size_chart(raw, chart, headline):
+    """Typeset the verified table without an image model copying its numbers."""
+    canvas=Image.new('RGB',(2000,2000),'#F3F5F7')
+    drawing=ImageDraw.Draw(canvas)
+    title=font(88,True)
+    label=headline or 'Size Guide'
+    if drawing.textlength(label,font=title)>1320:
+        raise ValueError('尺码图标题过长，无法在产品预览旁清楚排版')
+    drawing.text((110,147),label,font=title,fill='#182536')
+    basis={'garment_measurements':'Garment measurements','body_measurements':'Body measurements'}.get(chart.get('measurementsScope'),'Measurements')
+    drawing.text((112,273),basis+' ('+str(chart['units'])+')',font=font(48),fill='#46505b')
+    left,top,right,bottom=SIZE_CHART_PREVIEW_BOX
+    with Image.open(io.BytesIO(raw)) as source:
+        preview=ImageOps.contain(source.convert('RGB'),(right-left,bottom-top),Image.Resampling.LANCZOS)
+    canvas.paste(preview,(right-preview.width,top+(bottom-top-preview.height)//2))
+    rows=[chart['columns'],*chart['rows']]
+    column=len(chart['columns'])
+    cell_width=1780//column
+    # A small offered size set still needs a readable full-canvas table.
+    # The old 174px cap left most of a two-size chart empty.
+    cell_height=min(380,1250//len(rows))
+    if cell_height<52 or cell_width<125:
+        raise ValueError('尺码表信息过多，无法在标准商品图中清楚排版')
+    x0,y0=110,550
+    for row_index,row in enumerate(rows):
+        top=y0+row_index*cell_height
+        drawing.rectangle((x0,top,x0+1780,top+cell_height),fill='#e2e8ee' if row_index==0 else '#fff')
+        for index,value in enumerate(row):
+            label=str(value)
+            size=min(98,max(56,round(cell_height*.26)))
+            if not row_index and len(label)>=10:size=max(49,size-7)
+            bold=row_index==0 or index==0
+            face=font(size,bold)
+            while size>28 and drawing.textlength(label,font=face)>cell_width-28:
+                size-=2;face=font(size,bold)
+            if drawing.textlength(label,font=face)>cell_width-28 or '\n' in label:
+                raise ValueError('尺码表单元格超出可读排版范围')
+            drawing.text((x0+index*cell_width+cell_width//2,top+cell_height//2),label,anchor='mm',font=face,fill='#182536')
+        drawing.line((x0,top+cell_height,x0+1780,top+cell_height),fill='#ced6df',width=2)
+    output=io.BytesIO();canvas.save(output,'PNG');return output.getvalue()
+
+
 def start(data,product):
     import studio_bridge as bridge
     project=bridge.latest_project(product['id'],data.get('deliverable','gallery'))
@@ -103,9 +150,14 @@ def start(data,product):
             failed=0
             for pos,index in enumerate(indices):
                 slot=project['plan']['slots'][index]
+                chart=None
                 if project.get('uiPlan'):
                     im=project['uiPlan']['images'][index];copy=bridge.artwork_copy(im)
-                    if set(copy)-{'headline','subline'}:raise ValueError('原图排版目前只支持标题与副标题，请先简化此分镜文字')
+                    if im.get('size_chart'):
+                        from ivyea_pipeline import size_chart_evidence
+                        chart=size_chart_evidence(project.get('sizeEvidence'))
+                        if not chart:raise ValueError('尺码图缺少已核实的尺寸表')
+                    elif set(copy)-{'headline','subline'}:raise ValueError('原图排版目前只支持标题与副标题，请先简化此分镜文字')
                     headline=copy.get('headline','');caption=copy.get('subline','')
                 else:headline=slot['headline'];caption=slot['caption']
                 task.update(stage='card-'+str(index),message='正在保留原图产品并排版第'+str(index+1)+'张',progress=pos/len(indices));bridge.task_save(task)
@@ -118,14 +170,22 @@ def start(data,product):
                     selected_source=base64.b64decode(visual.encode_reference(project['references'][ref_index]).split(',',1)[1])
                 crop_proof=None
                 if str(index) in crops:selected_source,crop_proof=crop_source(selected_source,crops[str(index)])
-                raw=compose(selected_source,index,headline,caption,preserve_full_source=mapped);rid=uuid.uuid4().hex
+                raw=(compose_size_chart(selected_source,chart,headline) if chart else
+                     compose(selected_source,index,headline,caption,preserve_full_source=mapped))
+                rid=uuid.uuid4().hex
                 (cache/(rid+'.image')).write_bytes(raw)
                 run={'id':rid,'projectId':project['id'],'productId':product['id'],'slot':index,'image':'local:'+rid,'status':'reviewing','mode':'source_layout','attempt':0,'manual':False,'qc':[],'autoRepair':False,'jobIds':[],'next':0,'config':{'resolution':'2K','size':'1:1','model':'source-photo-layout'}}
                 run['sourceLayout']={'referenceIndex':ref_index if mapped else 0,'originalReference':project['references'][ref_index if mapped else 0],'crop':crop_proof,'outputSha256':hashlib.sha256(raw).hexdigest()}
                 visual.save_run(run)
                 try:
-                    qc=visual.review(project,index,'data:image/png;base64,'+base64.b64encode(raw).decode(),source_layout=True)
-                    technical=image_quality.inspect(raw,main=index==0,full_bleed=index>0);qc['technical']=technical
+                    technical=image_quality.inspect(raw,main=index==0,full_bleed=index>0,size_chart=bool(chart))
+                    composition=image_composition.for_project(raw,project,index)
+                    technical['composition']=composition
+                    technical['issues'].extend(composition['issues'])
+                    technical['pass']=technical['pass'] and composition['pass']
+                    qc=(visual.review(project,index,'data:image/png;base64,'+base64.b64encode(raw).decode(),source_layout=True)
+                        if technical['pass'] else {'pass':False,'issues':[],'reviewModel':'本地构图与技术检查','at':time.time()})
+                    qc['technical']=technical
                     qc['issues']=[*qc.get('issues',[]),*[i['message'] for i in technical['issues'] if i['severity']=='error']];qc['pass']=qc.get('pass') is True and technical['pass'] and not qc['issues']
                     run['qc']=[qc];run['status']='awaiting_manual' if qc['pass'] else 'needs_revision'
                     if not qc['pass']:failed+=1

@@ -10,7 +10,7 @@ export function resolveCategoryHints(...sources){
 export function chooseCategory(candidates,hints={},title=''){
  const words=value=>String(value??'').toLowerCase().replace(/\bt[\s-]*shirts?\b/g,'tshirt').match(/[a-z]+/g)||[];
  const kinds=['tshirt','cardigan','sweater','hoodie','sweatshirt','dress','shirt','blouse','coat','jacket','bag','backpack','towel','pants','skirt','short','vest','shrug','pullover'];
- const type=word=>kinds.find(kind=>word===kind||word===kind+'s');
+ const type=word=>/^(?:trousers?|pants?)$/.test(word)?'pants':kinds.find(kind=>word===kind||word===kind+'s');
  const types=value=>[...new Set(words(value).map(type).filter(Boolean))];
  const path=typeof hints.path==='string'?hints.path.trim():'',source=path||[hints.title,title].filter(Boolean).join(' ');
  // The verified taxonomy leaf outranks words in its ancestors or a marketing
@@ -40,13 +40,13 @@ export function schemaVariation(meta,items){
  const properties=schema?.properties;if(!properties)throw Error('ERP未返回真实类目schema');
  const get=(key,leaf)=>properties[key]?.items?.properties?.[leaf];
  const colorField=get('color','value')?'color.0.value':get('color_name','value')?'color_name.0.value':null;
- const sizeField=get('apparel_size','size')?'apparel_size.0.size':get('shirt_size','size')?'shirt_size.0.size':get('bottoms_size','size')?'bottoms_size.0.size':get('size','value')?'size.0.value':get('size_name','value')?'size_name.0.value':null;
+ const sizeField=get('apparel_size','size')?'apparel_size.0.size':get('shirt_size','size')?'shirt_size.0.size':get('bottoms_size','size')?'bottoms_size.0.size':get('skirt_size','size')?'skirt_size.0.size':get('size','value')?'size.0.value':get('size_name','value')?'size_name.0.value':null;
  if(!colorField||!sizeField)throw Error('此类目不支持当前产品的颜色/尺码结构，请补齐实际变体维度');
  const themes=get('variation_theme','name')?.enum||[];
  const theme=['COLOR_NAME/SIZE_NAME','COLOR/SIZE','SIZE_NAME/COLOR_NAME','SIZE/COLOR'].find(v=>themes.includes(v));
  if(!theme)throw Error('ERP类目未提供可用的颜色尺码变体主题');
  const parts=sizeField.split('.'),sizeMeta=get(parts[0],parts[2]),values=sizeMeta.enum,labels=sizeMeta.enumNames||[];
- const aliases={small:'s',medium:'m',large:'l',xlarge:'xl',xxlarge:'xxl',xxxlarge:'xxxl',onesize:'onesize',均码:'onesize'};
+ const aliases={xsmall:'xs',xxsmall:'xxs',small:'s',medium:'m',large:'l',xlarge:'xl',xxlarge:'xxl',xxxlarge:'xxxl',onesize:'onesize',均码:'onesize'};
  const canonical=s=>{let n=norm(s);return aliases[n]||n;};
  const sizeValues={};for(const label of new Set(items.map(i=>i.size))){
   if(!values){sizeValues[label]=label;continue;}
@@ -183,6 +183,35 @@ export async function pickOption(page,text,control,record,persist,step='option')
  }catch(error){checkpoint.error=String(error.message||error);await note('failed');throw error;}
 }
 
+const RECOMMENDATION_DIALOG='[role=dialog][aria-label="亚马逊产品类型推荐"]';
+
+export const sameCategoryPath=(left,right)=>Boolean(norm(left)&&norm(left)===norm(right));
+
+export async function requestRecommendationsForSourceTitle(page,sourceTitle,listingTitle,readRecommendations){
+ await page.click(RECOMMENDATION_DIALOG+' .el-dialog__footer button.el-button--default');
+ await page.waitForFunction(()=>![...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].some(e=>e.getBoundingClientRect().width),undefined,{timeout:8000});
+ await page.fill('input[placeholder="产品标题"]',sourceTitle);
+ try{
+  await page.click('loc=role:button[name="自动识别产品类型"]');
+  return await readRecommendations(page);
+ }finally{
+  // The title is used only for the native recommendation. Keep the original
+  // buyer-facing title even if the lookup or subsequent selection fails.
+  await page.evaluate(title=>{
+   const field=document.querySelector('input[placeholder="产品标题"]');
+   if(!field)throw Error('原ERP标题控件变化');
+   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,title);
+   field.dispatchEvent(new Event('input',{bubbles:true}));
+   field.dispatchEvent(new Event('change',{bubbles:true}));
+  },listingTitle);
+ }
+}
+
+async function readNativeRecommendations(page){
+ await page.waitForFunction(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"] label.el-radio')].some(e=>e.getBoundingClientRect().width),undefined,{timeout:20000});
+ return page.evaluate(()=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);return [...d.querySelectorAll('label.el-radio')].map((e,index)=>({index,text:e.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim()}));});
+}
+
 export async function prepareNativeDraft(page,input,record,persist){
  const url='https://www.junfeikuajing.com/#/amazon/product/'+record.draftId+'?type=draft';
  await page.goto(url);await page.waitForFunction(()=>document.querySelector('input[placeholder="产品标题"]')?.value,undefined,{timeout:20000});
@@ -199,13 +228,26 @@ export async function prepareNativeDraft(page,input,record,persist){
   if(!current)try{await page.waitForFunction(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].some(e=>e.getBoundingClientRect().width),undefined,{timeout:5000});}catch{}
   const hasDialog=await page.evaluate(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].some(e=>e.getBoundingClientRect().width));
   if(!hasDialog){await page.click('loc=role:button[name="选择分类"]');}
-  await page.waitForFunction(()=>[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"] label.el-radio')].some(e=>e.getBoundingClientRect().width),undefined,{timeout:20000});
-  const candidates=await page.evaluate(()=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);return [...d.querySelectorAll('label.el-radio')].map((e,index)=>({index,text:e.innerText.split(/[\u3400-\u9fff]/)[0].replace(/[\uE000-\uF8FF]/g,' > ').replace(/\s+/g,' ').trim()}));});
+  let candidates=await readNativeRecommendations(page);
   const hints=resolveCategoryHints(input.destination.categoryHints,input.categoryHints);
-  if(record.categoryRecommendation)(record.categoryRecommendationHistory??=[]).push(record.categoryRecommendation);
-  record.categoryRecommendation={observedAt:new Date().toISOString(),draftId:String(record.draftId),store:input.store,candidates:structuredClone(candidates),hints:structuredClone(hints),title:input.goods.title};await persist();
+  const noteRecommendations=async title=>{
+   if(record.categoryRecommendation)(record.categoryRecommendationHistory??=[]).push(record.categoryRecommendation);
+   record.categoryRecommendation={observedAt:new Date().toISOString(),draftId:String(record.draftId),store:input.store,candidates:structuredClone(candidates),hints:structuredClone(hints),title};
+   await persist();
+  };
+  await noteRecommendations(input.goods.title);
+  const verifiedPath=typeof hints.path==='string'&&hints.path.trim();
+  const sourceTitle=typeof hints.title==='string'&&hints.title.trim();
+  const exactPaths=()=>candidates.filter(candidate=>sameCategoryPath(candidate.text,verifiedPath));
+  if(verifiedPath&&sourceTitle&&norm(sourceTitle)!==norm(input.goods.title)&&!exactPaths().length){
+   candidates=await requestRecommendationsForSourceTitle(page,sourceTitle,input.goods.title,readNativeRecommendations);
+   await noteRecommendations(sourceTitle);
+   if(exactPaths().length!==1)throw Error('ERP重新识别后仍未找到唯一的已核实类目');
+  }
   const selected=chooseCategory(candidates,hints,input.goods.title);record.categoryChoice=selected;await persist();
-  const selector=await page.evaluate(index=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);const e=d.querySelectorAll('label.el-radio')[index];if(!e)throw Error('类目列表变化');e.setAttribute('data-collection-category','true');e.scrollIntoView({block:'center',inline:'nearest'});return e.querySelector('.el-radio__input')?'[data-collection-category] .el-radio__input':'[data-collection-category]';},selected.index);
+  // Click the full, source-matched radio label. The decorative inner span can
+  // be reported underneath its own modal by the trusted pointer resolver.
+  const selector=await page.evaluate(index=>{const d=[...document.querySelectorAll('[role=dialog][aria-label="亚马逊产品类型推荐"]')].find(e=>e.getBoundingClientRect().width);const e=d.querySelectorAll('label.el-radio')[index];if(!e)throw Error('类目列表变化');e.setAttribute('data-collection-category','true');e.scrollIntoView({block:'center',inline:'nearest'});return '[data-collection-category]';},selected.index);
   await page.click(selector);await page.click('[role=dialog][aria-label="亚马逊产品类型推荐"] .el-dialog__footer button:has-text("确定")');
   await page.waitForFunction(()=>window.__collectionSchema?.data,undefined,{timeout:20000});meta=await page.evaluate(()=>window.__collectionSchema.data);
  }finally{await page.evaluate(()=>{const s=window.__collectionSchema;if(s){XMLHttpRequest.prototype.open=s.open;XMLHttpRequest.prototype.send=s.send;delete window.__collectionSchema;}});}

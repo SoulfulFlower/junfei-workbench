@@ -71,9 +71,10 @@ export function verifyPersistedDraft(response,input,urls,{allowInherited=false}=
  });
 }
 
-export async function readPersistedDraft(page,draftId){
+export async function readPersistedDraft(page,draftId,{beforeOpen}={}){
  if(!/^\d+$/.test(String(draftId)))throw Error('草稿编号无效');
  await page.goto('https://www.junfeikuajing.com/#/product/collect');await page.waitForSelector('input[placeholder="关键词搜索"]',{state:'visible'});
+ if(beforeOpen)await beforeOpen();
  await page.evaluate(id=>{
   if(window.__persistedDraftRead)throw Error('已有草稿回读');
   const open=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send,targets=new WeakMap();window.__persistedDraftRead={open,send,result:null};

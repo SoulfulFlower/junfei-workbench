@@ -37,7 +37,7 @@ class DiscoveryAPITests(unittest.TestCase):
             'asin':'B012345678', 'sourceTitle':'Cotton Pouches for Travel', 'phrase':'Cotton Pouches',
             'url':'https://www.amazon.com/dp/B012345678'}]}
 
-    def test_shared_scripts_and_discovery_compatibility_assets_are_served(self):
+    def test_discovery_script_is_served_on_first_load(self):
         import urllib.request
         from html.parser import HTMLParser
         class Scripts(HTMLParser):
@@ -52,8 +52,9 @@ class DiscoveryAPITests(unittest.TestCase):
         with opener.open(self.base + '/index.html', timeout=5) as response:
             page=response.read().decode('utf-8')
         parser=Scripts(); parser.feed(page)
-        self.assertIn('/workbench-home.js', parser.sources)
-        for path in dict.fromkeys([*parser.sources, '/discovery-ui.js', '/selection.js']):
+        self.assertIn('/discovery-ui.js', parser.sources)
+        self.assertLess(parser.sources.index('/discovery-ui.js'), parser.sources.index('/selection.js'))
+        for path in parser.sources:
             with self.subTest(path=path):
                 with opener.open(self.base + path, timeout=5) as response:
                     self.assertEqual(response.status, 200)

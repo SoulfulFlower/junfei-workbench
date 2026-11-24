@@ -4,6 +4,7 @@ import {schemaVariation} from './ego-collection-prepare.mjs';
 import {readPersistedDraft,verifyPersistedDraft,assertMainImageLocatorSchema} from './ego-draft-readback.mjs';
 import {saveDraft} from './ego-draft-save.mjs';
 import {validateSchemaAttributes} from './ego-schema-validator.mjs';
+import {coatProductAttributes} from './ego-coat-attributes.mjs';
 
 const clone=v=>structuredClone(v);
 const schemaOf=meta=>typeof meta.schema_content==='string'?JSON.parse(meta.schema_content):meta.schema_content;
@@ -25,7 +26,8 @@ export function makeUsPreparedInput(input,meta,brand){
  const sizeKey=prepared.destination.variationFields.size.split('.')[0],definition=schema.properties[sizeKey]?.items?.properties;
  if(input.publicationFacts?.specialSizeType==='Standard')for(const key of ['body_type','height_type']){
   const p=definition?.[key];if(!p)continue;
-  if(!p.enum?.includes('regular')||!/no special/i.test(p.description||''))throw Error('实际schema未提供普通款尺码分类依据 '+key);
+  const standardMeaning=/no special/i.test(p.description||'')||(key==='body_type'&&/select\s+["']?regular["']?\s+for\s+standard sizing/i.test(p.description||''));
+  if(!p.enum?.includes('regular')||!standardMeaning)throw Error('实际schema未提供普通款尺码分类依据 '+key);
   prepared.destination.sizeAttributes[key]='regular';prepared.destination.sizeAttributeSchema.properties[key]={type:p.type,enum:['regular']};
   if(!prepared.destination.sizeAttributeSchema.required.includes(key))prepared.destination.sizeAttributeSchema.required.push(key);
  }
@@ -51,7 +53,40 @@ export function usProductAttributes(input,meta){
  if(schema.properties?.list_price){const def=schema.properties.list_price.items?.properties?.value;if(!/enter\s+0/i.test(def?.description||''))throw Error('缺少有依据的美国参考价，实际schema未允许未知值0');attrs.list_price=[{currency:'USD',value:0,marketplace_id:market}];}
  const line=label=>{const matches=description.split('\n').filter(x=>x.startsWith(label+':'));return matches.length===1?matches[0].slice(label.length+1).trim():'';};
  const style=line('Style'),neck=line('Neckline'),sleeves=line('Sleeves');
+ if(meta.product_type_name==='SHIRT'){
+  // Use unique, explicit frozen product lines, rather than guessing a fit
+  // from a marketing title or reusing another product's template attributes.
+  const permits=(definition,value)=>{
+   const choices=definition?.enum??definition?.anyOf?.flatMap(branch=>branch.enum??[])??[];
+   return choices.length?choices.includes(value):definition?.type==='string';
+  };
+  const fit=/^(Relaxed|Regular|Fitted|Slim|Oversized)(?: fit)?$/i.exec(line('Fit'));
+  if(fit&&schema.properties?.fit_type){
+   const value=fit[1][0].toUpperCase()+fit[1].slice(1).toLowerCase();
+   if(!permits(schema.properties.fit_type.items?.properties?.value,value))throw Error('明确版型不在美国实际schema中');
+   attrs.fit_type=[localized('fit_type',value)];
+  }
+  if(/^Long(?: sleeves?)?$/i.test(sleeves)&&schema.properties?.sleeve){
+   const p=schema.properties.sleeve.items?.properties;
+   const evidence=input.usPreparation?.sleeveType;
+   if(evidence&&(evidence.value!=='Cuff Sleeve'||evidence.source!=='bound_supplier_photo_review'||evidence.reviewerType!=='agent'||
+     evidence.humanReviewed!==false||evidence.sourceUrl!==facts.supplierModelNumberEvidence?.sourceUrl||
+     evidence.sourceUrl!==input.goods.sourceUrl||!/^\/uploads\/[a-zA-Z0-9_-]+\.(png|jpg|jpeg|webp)$/.test(evidence.referenceImage||'')||
+     !/^[a-f0-9]{64}$/.test(evidence.referenceSha256||'')||!evidence.observations))throw Error('袖型缺少同款已核实供货照片依据');
+   const sleeveType=evidence?.value||'Long Sleeve';
+   if(!permits(p?.type?.items?.properties?.value,sleeveType))throw Error('明确长袖不在美国实际schema中');
+   const value={type:[{value:sleeveType,language_tag:language}],marketplace_id:market};
+   if(p.length_description){
+    if(!permits(p.length_description.items?.properties?.value,'long_sleeve'))throw Error('明确袖长不在美国实际schema中');
+    value.length_description=[{value:'long_sleeve'}];
+   }
+   attrs.sleeve=[value];
+  }
+ }
  if(meta.product_type_name==='PANTS'){
+  // Preserve the unique explicit style from the frozen listing for all pants.
+  // A button-front or other construction still has a required style field.
+  if(style&&schema.properties?.style)attrs.style=[localized('style',style)];
   const nested=(field,part,value)=>{
    const p=schema.properties?.[field]?.items?.properties, v=p?.[part]?.items?.properties?.value;
    const choices=v?.enum??v?.anyOf?.flatMap(branch=>branch.enum??[])??[];
@@ -64,15 +99,21 @@ export function usProductAttributes(input,meta){
   }
   if(schema.properties?.leg?.items?.properties?.style){
    // Amazon can reject a missing leg style after accepting the ERP draft.
-   const explicit=line('Leg style');
-   const cuts=[...style.matchAll(/\b(wide|straight|tapered|skinny|flared|boot[- ]cut)[- ]leg\b/gi)];
-   const labels=new Set(cuts.map(([,cut])=>cut.toLowerCase().replace(/-/g,' ')));
-   if(explicit)labels.add(explicit.toLowerCase().replace(/-/g,' '));
+   const explicit=[...description.matchAll(/^Leg style:[ \t]*(\S[^\n]*)$/gim)].map(([,cut])=>cut);
+   const styles=[...description.matchAll(/^Style:[ \t]*([^\n]*)$/gim)].map(([,value])=>value);
+   const inferred=styles.flatMap(value=>[...value.matchAll(/\b(wide|straight|tapered|skinny|flared|boot[- ]cut)[- ]leg\b/gi)].map(([,cut])=>cut));
+   const labels=new Set([...explicit,...inferred].map(cut=>cut.trim().toLowerCase().replace(/-/g,' ').replace(/ +leg$/,'')));
    if(labels.size!==1)throw Error('美国裤装缺少唯一已核实的腿型，请补齐同款供货资料再发布');
    const label=[...labels][0].replace(/\b\w/g,letter=>letter.toUpperCase());
    attrs.leg=nested('leg','style',label);
   }
-  const amendment=input.usPreparation?.pantsRise;
+  const closureDefault=facts.closureTypeEvidence;
+  if(!attrs.closure&&closureDefault?.source==='user_configured_defaults'&&closureDefault.productId===input.productId&&
+     closureDefault.scope==='missing_catalogue_attribute_only'&&closureDefault.value==='Button'&&closureDefault.supplierVerified===false&&
+     typeof closureDefault.instruction==='string'&&closureDefault.instruction.trim()&&closureDefault.configuredAt){
+   attrs.closure=nested('closure','type',closureDefault.value);
+  }
+  const amendment=input.usPreparation?.pantsRise||facts.riseTypeEvidence;
   if(amendment){
    const supported={'高腰':'High Rise','中腰':'Mid Rise','低腰':'Low Rise'};
    if(amendment.sourceUrl!==facts.supplierModelNumberEvidence?.sourceUrl||amendment.field!=='腰型'||
@@ -80,22 +121,104 @@ export function usProductAttributes(input,meta){
    attrs.rise=nested('rise','style',amendment.value);
   }
  }
+ if(meta.product_type_name==='SKIRT'){
+  // Use the skirt's frozen construction, rather than a stale clothing template.
+  if(style&&schema.properties?.style)attrs.style=[localized('style',style)];
+  if(/\bmini skirt\b/i.test(style)&&schema.properties?.item_length_description)attrs.item_length_description=[localized('item_length_description','Mini')];
+  const evidence=input.usPreparation?.skirtFacts;
+  if(evidence){
+   const choices={'高腰':'High Rise','中腰':'Mid Rise','低腰':'Low Rise'};
+   if(evidence.source!=='bound_supplier_catalogue_facts'||evidence.humanReviewed!==false||!evidence.retrievedAt||
+      evidence.sourceUrl!==input.goods.sourceUrl||evidence.sourceUrl!==facts.supplierModelNumberEvidence?.sourceUrl||
+      evidence.supplierModelNumber!==facts.supplierModelNumber||evidence.rise?.path!=='sourceImport.supplier.title'||
+      choices[evidence.rise?.sourceValue]!==evidence.rise?.value||
+      !evidence.rise?.sourceText?.includes(evidence.rise.sourceValue)||
+      Object.keys(choices).filter(k=>evidence.rise.sourceText.includes(k)).length!==1||
+      evidence.pattern?.path!=='sourceImport.supplier.attributes.图案'||evidence.pattern?.sourceValue!=='纯色'||evidence.pattern?.value!=='Solid')
+    throw Error('短裙属性缺少同款货源原始标题/属性依据');
+   const p=schema.properties.rise?.items?.properties,v=p?.style?.items?.properties?.value;
+   if(!(v?.enum??v?.anyOf?.flatMap(b=>b.enum??[])??[]).includes(evidence.rise.value))throw Error('短裙腰型不在真实schema中');
+   attrs.rise=[{style:[{value:evidence.rise.value,language_tag:language}],marketplace_id:market}];
+   attrs.pattern=[localized('pattern',evidence.pattern.value)];
+  }
+  if(/^Visible side zipper$/i.test(line('Closure'))&&schema.properties?.closure){
+   const p=schema.properties.closure.items?.properties,v=p?.type?.items?.properties?.value;
+   const choices=v?.enum??v?.anyOf?.flatMap(branch=>branch.enum??[])??[];
+   if(!choices.includes('Zipper'))throw Error('美国短裙实际类目不支持已核实的拉链闭合');
+   attrs.closure=[{type:[{value:'Zipper',language_tag:language}],marketplace_id:market}];
+  }
+  if(schema.properties?.supplier_declared_dg_hz_regulation&&
+     facts.waterResistanceLevelSource?.basis?.classification==='ordinary_apparel'&&
+     /^\d+%\s*polyester,\s*\d+%\s*(?:spandex|elastane)$/i.test(fabric))
+   attrs.supplier_declared_dg_hz_regulation=[localized('supplier_declared_dg_hz_regulation','not_applicable')];
+ }
  if(/pullover/i.test(style)&&schema.properties?.style)attrs.style=[localized('style','Pullover')];
- if(meta.product_type_name==='SWEATER'&&/\bcardigan\b/i.test(input.goods.title)&&/^Knit$/i.test(line('Texture'))&&/\bbuttons\b/i.test(line('Front closure'))){
-  if(schema.properties?.style)attrs.style=[localized('style','Button-Front Knit Cardigan')];
-  if(schema.properties?.supplier_declared_dg_hz_regulation&&/^Polyester$/i.test(fabric)&&
+ const hoodedHalfZip=/\bhooded pullover\b/i.test(style)&&/^Half[- ]zip$/i.test(line('Closure'))&&/^Drawstring(?: hood)?$/i.test(line('Hood'));
+ const halfZip=/\bhalf[- ]zip\b/i.test(style)||hoodedHalfZip;
+ const fauxSuedeButtonPullover=/^Four-button half placket$/i.test(line('Front'))&&/\bpullover\b/i.test(style)&&
+  /^Faux suede made with polyester and elastane$/i.test(fabric);
+ if(meta.product_type_name==='SWEATSHIRT'&&(halfZip||fauxSuedeButtonPullover)){
+  const permits=(definition,value)=>(definition?.enum??definition?.anyOf?.flatMap(branch=>branch.enum??[])??[]).includes(value);
+  const neckStyle=schema.properties?.neck?.items?.properties?.neck_style?.items?.properties?.value;
+  const fitStyle=schema.properties?.fit_type?.items?.properties?.value;
+  if(/^(?:Tall )?stand collar$/i.test(line('Collar'))&&permits(neckStyle,'Collared Neck'))attrs.neck=[{neck_style:[{value:'Collared Neck',language_tag:language}],marketplace_id:market}];
+  if(hoodedHalfZip&&permits(neckStyle,'Hooded Neck'))attrs.neck=[{neck_style:[{value:'Hooded Neck',language_tag:language}],marketplace_id:market}];
+  if(halfZip&&/\bregular[- ]cut\b/i.test(style)&&permits(fitStyle,'Regular'))attrs.fit_type=[localized('fit_type','Regular')];
+  if((fauxSuedeButtonPullover||hoodedHalfZip)&&/\brelaxed[- ]fit\b/i.test(style)&&permits(fitStyle,'Relaxed'))attrs.fit_type=[localized('fit_type','Relaxed')];
+  if(schema.properties?.supplier_declared_dg_hz_regulation&&facts.waterResistanceLevelSource?.basis?.classification==='ordinary_apparel'&&
+     (fauxSuedeButtonPullover||(halfZip&&/^\d+%\s*polyester,\s*\d+%\s*(?:spandex|elastane)$/i.test(fabric))))
+   attrs.supplier_declared_dg_hz_regulation=[localized('supplier_declared_dg_hz_regulation','not_applicable')];
+ }
+ if(meta.product_type_name==='SWEATER'){
+  // A frozen Fit line may describe the pullover when no Style line exists.
+  // Keep this source-bound classification separate from supplier certification.
+  const blend=fabric.match(/^(\d+)%\s*polyester,\s*(\d+)%\s*(?:spandex|elastane)$/i);
+  const ribbedCowlPullover=!style&&/^Loose pullover shape$/i.test(line('Fit'))&&
+   /^Fine vertical ribbing$/i.test(line('Texture'))&&/^Deep draped cowl$/i.test(neck)&&
+   /\bcowl neck\b/i.test(input.goods.title)&&/\bpullover\b/i.test(input.goods.title)&&
+   blend&&Number(blend[1])+Number(blend[2])===100&&Number(blend[1])>50&&
+   /^https:\/\/detail\.1688\.com\/offer\/\d+\.html$/.test(input.goods.sourceUrl||'')&&
+   facts.supplierModelNumberEvidence?.source==='supplier_attribute'&&
+   facts.supplierModelNumberEvidence.sourceUrl===input.goods.sourceUrl&&
+   Boolean(facts.supplierModelNumber)&&facts.supplierModelNumberEvidence.value===facts.supplierModelNumber;
+  if(ribbedCowlPullover&&schema.properties?.style)attrs.style=[localized('style','Cowl Neck Ribbed Pullover')];
+  const knitCardigan=/\bcardigan\b/i.test(input.goods.title)&&/^Knit$/i.test(line('Texture'))&&/\bbuttons\b/i.test(line('Front closure'));
+  const knitPullover=/\bpullover\b/i.test(style)&&/^Polyester-rich rib knit$/i.test(fabric)&&
+   facts.weaveTypeEvidence?.value==='Knit'&&facts.weaveTypeEvidence?.source==='supplier_attribute'&&
+   Boolean(facts.supplierModelNumberEvidence?.sourceUrl)&&facts.weaveTypeEvidence.sourceUrl===facts.supplierModelNumberEvidence.sourceUrl;
+  // Ordinary acrylic knitwear classification from the frozen, source-bound
+  // composition and Style line; this is not a supplier certification.
+  const acrylicPullover=/^100%\s*acrylic$/i.test(fabric)&&/\bknitted\s+pullover\b/i.test(style)&&
+   /^https:\/\/detail\.1688\.com\/offer\/\d+\.html$/.test(input.goods.sourceUrl||'')&&
+   facts.supplierModelNumberEvidence?.source==='supplier_attribute'&&
+   facts.supplierModelNumberEvidence.sourceUrl===input.goods.sourceUrl&&
+   Boolean(facts.supplierModelNumber)&&facts.supplierModelNumberEvidence.value===facts.supplierModelNumber;
+  if(knitCardigan&&schema.properties?.style)attrs.style=[localized('style','Button-Front Knit Cardigan')];
+  if(schema.properties?.supplier_declared_dg_hz_regulation&&((knitCardigan&&/^Polyester$/i.test(fabric))||knitPullover||acrylicPullover||ribbedCowlPullover)&&
      facts.waterResistanceLevelSource?.basis?.classification==='ordinary_apparel'){
    attrs.supplier_declared_dg_hz_regulation=[localized('supplier_declared_dg_hz_regulation','not_applicable')];
   }
  }
  if(/\bfitted\b/i.test(style)&&schema.properties?.fit_type)attrs.fit_type=[localized('fit_type','Fitted')];
+ const corduroyTunic=meta.product_type_name==='SHIRT'&&/\bcorduroy\b/i.test(fabric)&&
+  /\btunic\b/i.test(input.goods.title)&&/^Product: women['’]s\b[^\n]*\btunic\b/im.test(description);
+ if(corduroyTunic){
+  if(schema.properties?.style)attrs.style=[localized('style','Corduroy Tunic')];
+  if(/^Relaxed$/i.test(line('Silhouette'))&&schema.properties?.fit_type)attrs.fit_type=[localized('fit_type','Relaxed')];
+  const sleeveType=schema.properties?.sleeve?.items?.properties?.type?.items?.properties?.value;
+  const sleeveChoices=sleeveType?.enum??sleeveType?.anyOf?.flatMap(branch=>branch.enum??[])??[];
+  if(/\bbatwing\s+sleeves?\b/i.test(sleeves)&&sleeveChoices.includes('Batwing Sleeve')){
+   attrs.sleeve=[{type:[{value:'Batwing Sleeve',language_tag:language}],marketplace_id:market}];
+  }
+ }
  if(/^crew neck$/i.test(neck)&&schema.properties?.neck)attrs.neck=[{neck_style:[{value:'Crew Neck',language_tag:language}],marketplace_id:market}];
  if(/^Long, with narrow cuff edges$/i.test(sleeves)&&schema.properties?.sleeve)attrs.sleeve=[{type:[{value:'Cuff Sleeve',language_tag:language}],length_description:[{value:'long_sleeve'}],marketplace_id:market}];
- // These facts follow the explicit Women breadcrumb, rather than a model guess.
+ // Use the explicit Women breadcrumb or the corroborated product description.
  const category=input.destination.categoryHints?.path||input.categoryHints?.path||'';
- if(/(?:^|>)\s*Women\s*(?:>|$)/i.test(category)){
+ if(/(?:^|>)\s*Women\s*(?:>|$)/i.test(category)||corduroyTunic){
   for(const [key,value]of [['department','Womens'],['target_gender','female'],['age_range_description','Adult']])if(schema.properties?.[key])attrs[key]=[localized(key,value)];
  }
+ Object.assign(attrs,coatProductAttributes(input,meta));
  return attrs;
 }
 
@@ -127,8 +250,8 @@ export function verifyUsPrepared(response,input,urls,attributes){
 }
 
 async function readUsSchema(page,input){
- await page.evaluate(()=>{if(window.__usPreparationSchema)throw Error('已有美国schema观察');const open=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send,targets=new WeakMap();window.__usPreparationSchema={open,send,data:null};XMLHttpRequest.prototype.open=function(m,u,...r){const url=new URL(u,location.href);targets.set(this,String(m).toUpperCase()==='GET'&&url.origin==='https://app.junfeikuajing.com'&&url.pathname==='/api/amazon/category/get-product-type');return open.call(this,m,u,...r);};XMLHttpRequest.prototype.send=function(b){if(targets.get(this))this.addEventListener('loadend',()=>{try{const r=JSON.parse(this.responseText);if(this.status===200&&r.code===0)window.__usPreparationSchema.data=r.data;}catch{}},{once:true});return send.call(this,b);};});
- try{const draft=await readPersistedDraft(page,input.destination.draftId);await page.waitForFunction(()=>window.__usPreparationSchema?.data,undefined,{timeout:20000});return{draft,meta:await page.evaluate(()=>window.__usPreparationSchema.data)};}
+ const beforeOpen=()=>page.evaluate(()=>{if(window.__usPreparationSchema)throw Error('已有美国schema观察');const open=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send,targets=new WeakMap();window.__usPreparationSchema={open,send,data:null};XMLHttpRequest.prototype.open=function(m,u,...r){const url=new URL(u,location.href);targets.set(this,String(m).toUpperCase()==='GET'&&url.origin==='https://app.junfeikuajing.com'&&url.pathname==='/api/amazon/category/get-product-type');return open.call(this,m,u,...r);};XMLHttpRequest.prototype.send=function(b){if(targets.get(this))this.addEventListener('loadend',()=>{try{const r=JSON.parse(this.responseText);if(this.status===200&&r.code===0)window.__usPreparationSchema.data=r.data;}catch{}},{once:true});return send.call(this,b);};});
+ try{const draft=await readPersistedDraft(page,input.destination.draftId,{beforeOpen});await page.waitForFunction(()=>window.__usPreparationSchema?.data,undefined,{timeout:20000});return{draft,meta:await page.evaluate(()=>window.__usPreparationSchema.data)};}
  finally{await page.evaluate(()=>{const s=window.__usPreparationSchema;if(s){XMLHttpRequest.prototype.open=s.open;XMLHttpRequest.prototype.send=s.send;delete window.__usPreparationSchema;}});}
 }
 
@@ -192,6 +315,20 @@ export async function prepareUsDraft(page,input,record,persist,adapters={}){
  if(record.preparedInput){
   const p=assertUsPreparedIdentity(input,record.preparedInput);
   if(saved){
+   const resumable=record.phase==='us_save_unknown'&&record.status==='save_unknown'&&record.requestSent===false&&
+    record.response===null&&record.submitted===null&&!record.confirmationRecovery&&record.schemaValidation?.passed===true&&
+    record.enumConfirmation?.includes('不在亚马逊选项中。确定要保存吗？')&&p.destination.shippingTemplate?.id;
+   if(resumable&&await page.evaluate(({draftId,sku,savedText})=>{
+    const boxes=[...document.querySelectorAll('.el-message-box')].filter(e=>e.getBoundingClientRect().width);
+    return location.href==='https://www.junfeikuajing.com/#/amazon/product/'+draftId+'?type=draft'&&!window.__finishedCollectionHook&&
+     document.querySelector('input[placeholder^="父Sku,"]')?.value===sku&&boxes.length===1&&boxes[0].innerText===savedText;
+   },{draftId:p.destination.draftId,sku:p.goods.parentSku,savedText:record.enumConfirmation})){
+    record.confirmationRecovery={originalSaveIntendedAt:record.saveIntendedAt,originalRequestSent:false,intendedAt:new Date().toISOString()};
+    await persist();
+    const wire={...input,usPrepared:p,usProductAttributes:record.productAttributes};
+    await api.save(page,wire,input.urls,record,persist,patchUsDraftPayload,{pending:true});
+    record.confirmationRecovery.response=record.response;await persist();
+   }
    const actual=await api.read(page,p.destination.draftId);
    p.destination.shippingTemplate??={};
    if(!p.destination.shippingTemplate.id)p.destination.shippingTemplate.id=record.submitted?.attributes?.merchant_shipping_group?.[0]?.value??actual.data?.extra?.attributes?.merchant_shipping_group?.[0]?.value;

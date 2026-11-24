@@ -1,7 +1,7 @@
 // Explicit recovery of one existing failed US family. No draft, SKU, image or
 // product content is created or edited. Native re-publish processes the family;
 // the failed-child list is diagnostic evidence, not a child-only retry scope.
-import {assertPublicationInput,publicationFingerprint,publicationFailureObservation,readNativePublication,queryPublicationRows} from './ego-publish-native.mjs';
+import {assertPublicationInput,publicationFingerprint,publicationFailureObservation,readNativePublication,queryPublicationRows,isUsApparelAdvisory} from './ego-publish-native.mjs';
 import {verifyRemoteAsset} from './ego-draft-images.mjs';
 
 const endpoint='https://app.junfeikuajing.com/api/amazon/goods/publish/re-publish';
@@ -32,9 +32,11 @@ function assertAuthorization(input,record,amendment){
 function assertMediaFailure(observation,amendment){
  if(!observation||observation.status!=='failed'||!observation.identityVerified||observation.unscopedMessageCount||!observation.count||
     observation.responseFingerprint!==amendment.failureResponseFingerprint||!idsEqual(observation.failedChildIds,amendment.failedChildIds)||
-    observation.children.some(row=>row.imagesSource!=='child_gallery'||row.images.length!==7||new Set(row.images).size!==7)||observation.messages.some(message=>!['300060','18320'].includes(message.code)))throw Error('原任务状态、失败范围、图片或错误类型不支持此次媒体恢复');
+    observation.children.some(row=>row.imagesSource!=='child_gallery'||row.images.length!==7||new Set(row.images).size!==7)||observation.messages.some(message=>!['300060','18320'].includes(message.code)&&!isUsApparelAdvisory(message,message.sku))||
+    !observation.messages.some(message=>['300060','18320'].includes(message.code)))throw Error('原任务状态、失败范围、图片或错误类型不支持此次媒体恢复');
  if(observation.children.some(row=>!['accepted','failed'].includes(row.status)||
-    (row.status==='failed'&&!row.messages.length)||(row.status==='accepted'&&row.messages.length)))throw Error('原子SKU失败状态或错误范围尚未完整核实');
+    (row.status==='failed'&&!row.messages.some(message=>['300060','18320'].includes(message.code)))||
+    (row.status==='accepted'&&row.messages.some(message=>!isUsApparelAdvisory(message,row.sku)))))throw Error('原子SKU失败状态或错误范围尚未完整核实');
  if(amendment.failedSkus&&!idsEqual(amendment.failedSkus,observation.skus))throw Error('恢复授权失败SKU与原任务不符');
 }
 
@@ -53,6 +55,7 @@ function mediaPlan(input,observation){
  };
  for(const child of observation.children.filter(row=>row.status==='failed')){
   for(const message of child.messages){
+   if(isUsApparelAdvisory(message,child.sku))continue;
    if(message.code==='18320'){add(child.main,child.main,'failed_main_image');continue;}
    for(const url of child.images)add(url,url,'failed_gallery');
    const reported=[...message.message.matchAll(/https?:\/\/[^\s"'<>]+/g)].map(match=>match[0]);

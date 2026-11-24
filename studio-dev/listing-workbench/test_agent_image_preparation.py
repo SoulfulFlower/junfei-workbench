@@ -325,6 +325,63 @@ class ImagePreparationTests(FixtureMixin, unittest.TestCase):
                 self.assertFalse(result['executionAllowed'])
                 self.assertEqual(result, self.preview())
 
+    def test_new_image_engine_running_or_unknown_blocks_without_replay(self):
+        path = self.root / 'image_engine.sqlite3'
+        with closing(sqlite3.connect(path)) as c, c:
+            c.execute('CREATE TABLE tasks(product_id TEXT,body TEXT)')
+        for status in ('planning', 'submitting', 'generating', 'reviewing',
+                       'submission_unknown', 'interrupted'):
+            with self.subTest(status=status):
+                with closing(sqlite3.connect(path)) as c, c:
+                    c.execute('DELETE FROM tasks')
+                    c.execute('INSERT INTO tasks VALUES(?,?)', (self.pid, json.dumps({
+                        'id': 'new-engine', 'productId': self.pid, 'status': status})))
+                result = self.assert_blocked()
+                self.assertEqual(result, self.preview())
+                self.assertTrue(any(r['kind'] == 'image_engine' and r['id'] == 'new-engine'
+                                    for r in result['history']['records']))
+
+    def test_new_completed_images_are_history_not_approval(self):
+        with closing(sqlite3.connect(self.root / 'image_engine.sqlite3')) as c, c:
+            c.execute('CREATE TABLE tasks(product_id TEXT,body TEXT)')
+            c.execute('INSERT INTO tasks VALUES(?,?)', (self.pid, json.dumps({
+                'id': 'new-engine', 'productId': self.pid, 'status': 'completed'})))
+            c.execute('INSERT INTO tasks VALUES(?,?)', ('other-product', json.dumps({
+                'id': 'other-engine', 'productId': 'other-product', 'status': 'submission_unknown'})))
+        result = self.preview()
+        self.assertFalse(result['imagesReady'])
+        self.assertFalse(result['executionAllowed'])
+        self.assertEqual(result['blockers'], [])
+        self.assertEqual([r['id'] for r in result['history']['records']], ['new-engine'])
+
+    def test_failed_selection_unknown_intent_stays_blocked_and_account_scoped(self):
+        path = self.root / 'image_tools.sqlite3'
+        with closing(sqlite3.connect(path)) as c, c:
+            c.execute('CREATE TABLE tasks(body TEXT)')
+        for extra in ({'failureReceipt': {'state': 'unknown'}},
+                      {'modelIntents': [{'status': 'pending'}]},
+                      {'modelIntents': [{'status': 'unknown'}]},
+                      {'result': {'status': 'unverified'}}):
+            with self.subTest(extra=extra):
+                with closing(sqlite3.connect(path)) as c, c:
+                    c.execute('DELETE FROM tasks')
+                    c.execute('INSERT INTO tasks VALUES(?)', (json.dumps({
+                        'id': 'mask', 'productId': self.pid, 'status': 'failed', **extra}),))
+                self.assert_blocked()
+                with closing(sqlite3.connect(path)) as c, c:
+                    c.execute('UPDATE tasks SET body=?', (json.dumps({
+                        'id': 'other-mask', 'productId': 'other-product', 'status': 'failed', **extra}),))
+                self.assertEqual(self.preview()['blockers'], [])
+
+    def test_new_journal_invalid_schema_cannot_look_like_no_history(self):
+        for name in ('image_engine.sqlite3', 'image_tools.sqlite3'):
+            with self.subTest(name=name):
+                path = self.root / name
+                with closing(sqlite3.connect(path)) as c, c:
+                    c.execute('CREATE TABLE unrelated(id TEXT)')
+                self.assert_blocked()
+                path.unlink()
+
     def test_malformed_history_json_blocks(self):
         with closing(sqlite3.connect(self.root / 'colour_sets.sqlite3')) as c, c:
             c.execute('CREATE TABLE sets(product_id TEXT, body TEXT)')

@@ -67,12 +67,123 @@ function fixture(){
  return{input,meta,body,urls};
 }
 
+test('ordinary source-bound 100% acrylic knitted SWEATER maps the actual nonhazardous catalogue enum',()=>{
+ const f=fixture();f.meta.product_type_name='SWEATER';
+ f.input.goods.description='Material: 100% acrylic\nStyle: Loose crew-neck knitted pullover';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123456.html';
+ f.input.publicationFacts.supplierModelNumber='AC123';
+ f.input.publicationFacts.supplierModelNumberEvidence={source:'supplier_attribute',sourceUrl:f.input.goods.sourceUrl,value:'AC123'};
+ f.input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ f.meta.schema_content.properties.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable','unknown']},marketplace_id:{}}}};
+ const original=structuredClone(f.input);
+ assert.equal(us.usProductAttributes(f.input,f.meta).supplier_declared_dg_hz_regulation[0].value,'not_applicable');
+ assert.deepEqual(f.input,original);
+ for(const change of [x=>x.goods.description=x.goods.description.replace('100% acrylic','Acrylic blend'),x=>x.goods.description=x.goods.description.replace('knitted pullover','jacket'),x=>x.publicationFacts.supplierModelNumberEvidence.sourceUrl='https://detail.1688.com/offer/999.html',x=>x.publicationFacts.waterResistanceLevelSource.basis.classification='protective_apparel']){
+  const input=structuredClone(original);change(input);assert.equal(us.usProductAttributes(input,f.meta).supplier_declared_dg_hz_regulation,undefined);
+ }
+ f.meta.schema_content.properties.supplier_declared_dg_hz_regulation.items.properties.value.enum=['unknown'];
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/实际枚举/);
+});
+
+test('source-bound cowl SWEATER derives missing style from its unique frozen fit and preserves blend facts',()=>{
+ const f=fixture();f.meta.product_type_name='SWEATER';
+ f.input.goods.title='Cowl Neck Tops for Women, Ribbed Knit Long Sleeve Pullover Shirt';
+ f.input.goods.description='Material: 95% polyester, 5% spandex\nNeckline: Deep draped cowl\nTexture: Fine vertical ribbing\nFit: Loose pullover shape';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123456.html';
+ f.input.publicationFacts.supplierModelNumber='CW123';
+ f.input.publicationFacts.supplierModelNumberEvidence={source:'supplier_attribute',sourceUrl:f.input.goods.sourceUrl,value:'CW123'};
+ f.input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ f.meta.schema_content.properties.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable','unknown']},marketplace_id:{}}}};
+ const original=structuredClone(f.input),attrs=us.usProductAttributes(f.input,f.meta);
+ assert.equal(attrs.style[0].value,'Cowl Neck Ribbed Pullover');
+ assert.equal(attrs.fabric_type[0].value,'95% polyester, 5% spandex');
+ assert.equal(attrs.supplier_declared_dg_hz_regulation[0].value,'not_applicable');assert.deepEqual(f.input,original);
+ for(const change of [x=>x.goods.description+='\nFit: Fitted',x=>x.goods.description=x.goods.description.replace('95%','85%'),x=>x.goods.description=x.goods.description.replace('Fine vertical ribbing','Woven'),x=>x.publicationFacts.supplierModelNumberEvidence.sourceUrl='foreign']){
+  const input=structuredClone(original);change(input);const a=us.usProductAttributes(input,f.meta);assert.equal(a.style,undefined);assert.equal(a.supplier_declared_dg_hz_regulation,undefined);
+ }
+ const protective=structuredClone(original);protective.publicationFacts.waterResistanceLevelSource.basis.classification='protective_apparel';assert.equal(us.usProductAttributes(protective,f.meta).supplier_declared_dg_hz_regulation,undefined);
+ f.meta.schema_content.properties.supplier_declared_dg_hz_regulation.items.properties.value.enum=['unknown'];assert.throws(()=>us.usProductAttributes(f.input,f.meta),/实际枚举/);
+});
+
 function preparedFixture(){
  const f=fixture(),prepared=us.makeUsPreparedInput(f.input,f.meta,'Actual Synced Brand');
  prepared.destination.shippingTemplate={name:'Actual US Shipping',id:'actual-template-id'};
  const attributes=us.usProductAttributes(prepared,f.meta);
  return{...f,prepared,attributes,wire:{...f.input,usPrepared:prepared,usProductAttributes:attributes}};
 }
+
+test('SKIRT maps its explicit zipper without inheriting pants closures or unsupported hazard classification',()=>{
+ const f=fixture();f.meta.product_type_name='SKIRT';
+ f.input.goods.description='Material: 95% polyester, 5% elastane\nStyle: Fitted mini skirt with short off-center front slit\nClosure: Visible side zipper';
+ f.input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ const p=f.meta.schema_content.properties;
+ p.closure={items:{properties:{type:{items:{properties:{value:{anyOf:[{type:'string'},{enum:['Button','Zipper']}]},language_tag:{type:'string'}}}},marketplace_id:{type:'string'}}}};
+ p.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable','unknown']},marketplace_id:{type:'string'}}}};
+ let a=us.usProductAttributes(f.input,f.meta);
+ assert.equal(a.closure[0].type[0].value,'Zipper');assert.equal(a.style[0].value,'Fitted mini skirt with short off-center front slit');
+ assert.equal(a.supplier_declared_dg_hz_regulation[0].value,'not_applicable');
+ delete f.input.publicationFacts.waterResistanceLevelSource;
+ assert.equal(us.usProductAttributes(f.input,f.meta).supplier_declared_dg_hz_regulation,undefined);
+ f.input.goods.description=f.input.goods.description.replace('Visible side zipper','Unknown');
+ assert.equal(us.usProductAttributes(f.input,f.meta).closure,undefined);
+ f.input.goods.description=f.input.goods.description.replace('Unknown','Visible side zipper');
+ p.closure.items.properties.type.items.properties.value.anyOf[1].enum=['Button'];
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/短裙实际类目/);
+});
+
+test('SKIRT binds supplier rise and pattern facts without guessing from a mini-skirt title',()=>{
+ const f=fixture();f.meta.product_type_name='SKIRT';
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/123.html';
+ f.input.goods.description='Material: 95% polyester, 5% elastane\nStyle: Fitted mini skirt with short off-center front slit';
+ f.input.publicationFacts.supplierModelNumber='K1';f.input.publicationFacts.supplierModelNumberEvidence={sourceUrl:f.input.goods.sourceUrl};
+ const p=f.meta.schema_content.properties;
+ p.item_length_description={items:{properties:{value:{enum:['Mini','Midi']},language_tag:{},marketplace_id:{}}}};
+ p.pattern={items:{properties:{value:{enum:['Solid','Floral']},language_tag:{},marketplace_id:{}}}};
+ p.rise={items:{properties:{style:{items:{properties:{value:{enum:['High Rise','Mid Rise','Low Rise']}}}},marketplace_id:{}}}};
+ const fact={source:'bound_supplier_catalogue_facts',sourceUrl:f.input.goods.sourceUrl,supplierModelNumber:'K1',retrievedAt:'2026-11-21',humanReviewed:false,
+  rise:{value:'High Rise',path:'sourceImport.supplier.title',sourceValue:'高腰',sourceText:'高腰蕾丝短裙'},pattern:{value:'Solid',path:'sourceImport.supplier.attributes.图案',sourceValue:'纯色'}};
+ f.input.usPreparation={skirtFacts:fact};let attrs=us.usProductAttributes(f.input,f.meta);
+ assert.equal(attrs.item_length_description[0].value,'Mini');assert.equal(attrs.rise[0].style[0].value,'High Rise');assert.equal(attrs.pattern[0].value,'Solid');
+ for(const change of [e=>e.sourceUrl='foreign',e=>e.supplierModelNumber='wrong',e=>e.rise.sourceText='高腰低腰短裙',e=>e.pattern.sourceValue='未知']){
+  const input=structuredClone(f.input);change(input.usPreparation.skirtFacts);assert.throws(()=>us.usProductAttributes(input,f.meta),/同款货源/);
+ }
+ delete f.input.usPreparation;attrs=us.usProductAttributes(f.input,f.meta);assert.equal(attrs.rise,undefined);assert.equal(attrs.pattern,undefined);
+});
+
+test('ordinary SHIRT maps explicit Fit and Sleeves facts through actual nested schema choices',()=>{
+ const f=fixture();
+ f.input.goods.description='Material: 95% Polyester, 5% Elastane\nStyle: Western pullover\nFit: Relaxed\nSleeves: Long';
+ const props=f.meta.schema_content.properties;
+ props.fit_type.items.properties.value={type:'string',anyOf:[{type:'string'},{enum:['Relaxed','Regular']}]};
+ props.sleeve.items.properties.type.items.properties.value={type:'string',anyOf:[{type:'string'},{enum:['Long Sleeve','Cuff Sleeve']}]};
+ const attrs=us.usProductAttributes(f.input,f.meta);
+ assert.equal(attrs.fit_type[0].value,'Relaxed');
+ assert.deepEqual(attrs.sleeve,[{type:[{value:'Long Sleeve',language_tag:'en_US'}],marketplace_id:'USMARKET',length_description:[{value:'long_sleeve'}]}]);
+ f.input.goods.sourceUrl='https://detail.1688.com/offer/12345.html';
+ f.input.publicationFacts.supplierModelNumberEvidence={sourceUrl:f.input.goods.sourceUrl};
+ f.input.usPreparation={sleeveType:{value:'Cuff Sleeve',source:'bound_supplier_photo_review',reviewerType:'agent',humanReviewed:false,
+  sourceUrl:f.input.goods.sourceUrl,referenceImage:'/uploads/supplier.jpg',referenceSha256:'a'.repeat(64),observations:'Verified smooth wrist cuff band in actual supply photograph.'}};
+ assert.equal(us.usProductAttributes(f.input,f.meta).sleeve[0].type[0].value,'Cuff Sleeve');
+ f.input.usPreparation.sleeveType.sourceUrl='https://detail.1688.com/offer/999.html';
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/袖型缺少/);delete f.input.usPreparation;
+ props.fit_type.items.properties.value.anyOf[1].enum=['Regular'];
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/明确版型/);
+ props.fit_type.items.properties.value.anyOf[1].enum=['Relaxed'];
+ props.sleeve.items.properties.type.items.properties.value.anyOf[1].enum=['Cuff Sleeve'];
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/明确长袖/);
+ props.sleeve.items.properties.type.items.properties.value.anyOf[1].enum=['Long Sleeve'];
+ props.sleeve.items.properties.length_description.items.properties.value.enum=['short_sleeve'];
+ assert.throws(()=>us.usProductAttributes(f.input,f.meta),/明确袖长/);
+});
+
+test('ordinary SHIRT never invents fit or sleeve facts from title, duplicate lines or unknown labels',()=>{
+ const f=fixture();f.input.goods.title='Relaxed Long Sleeve Top';
+ for(const lines of ['Fit: \nSleeves: ','Fit: Relaxed\nFit: Slim\nSleeves: Long\nSleeves: Short','Fit: Unknown\nSleeves: Unknown']){
+  f.input.goods.description='Material: Polyester\nStyle: Pullover\n'+lines;
+  const attrs=us.usProductAttributes(f.input,f.meta);
+  assert.equal(attrs.fit_type,undefined);assert.equal(attrs.sleeve,undefined);
+ }
+});
 function persisted(body,input){return{code:0,data:{...structuredClone(body),market:{alias:input.store},sku:input.goods.parentSku,
  extra:{images:body.images,attributes:body.attributes,product_description:body.product_description,bullet_point:body.bullet_point,keywords:body.keywords},
  items:body.items.map(row=>({...structuredClone(row),pid:body.id,extra:{images:row.images,attributes:row.attributes}}))}};}
@@ -93,6 +204,20 @@ test('US preparation requires explicit origin and care facts and validates the a
   const meta=structuredClone(f.meta);change(meta);assert.throws(()=>us.makeUsPreparedInput(f.input,meta,'Actual Synced Brand'));
  }
  assert.throws(()=>us.makeUsPreparedInput(f.input,f.meta,''));
+});
+
+test('standard SKIRT body type accepts the native standard-sizing description and rejects unsupported meanings',()=>{
+ const f=fixture();f.meta.product_type_name='SKIRT';
+ const size=f.meta.schema_content.properties.shirt_size;
+ size.items.properties.body_type.description='Provide the fit category for the skirt based on body shape. Select Regular for standard sizing or Slim for narrower proportions.';
+ const mapped=JSON.parse(JSON.stringify(f.meta).replaceAll('shirt_size','skirt_size'));
+ const p=us.makeUsPreparedInput(f.input,mapped,'Actual Synced Brand');
+ assert.equal(p.destination.variationFields.size,'skirt_size.0.size');
+ assert.equal(p.destination.sizeAttributes.body_type,'regular');
+ for(const edit of [s=>s.description='Select Slim for narrower proportions.',s=>s.enum=['slim','plus']]){
+  const changed=structuredClone(mapped);edit(changed.schema_content.properties.skirt_size.items.properties.body_type);
+  assert.throws(()=>us.makeUsPreparedInput(f.input,changed,'Actual Synced Brand'),/普通款尺码分类依据/);
+ }
 });
 
 test('fabric must come from one frozen Material line and never from stale template attributes',()=>{
@@ -122,6 +247,22 @@ test('missing water facts and schemas without that field preserve prior US behav
  assert.equal(us.usProductAttributes(us.makeUsPreparedInput(f.input,f.meta,'Actual Synced Brand'),f.meta).water_resistance_level,undefined);
 });
 
+test('US pants preserve supplier rise and an explicit seller catalogue closure setting',()=>{
+ const {prepared:input,meta}=preparedFixture();meta.product_type_name='PANTS';
+ input.goods.description='Material: Polyester\nStyle: Wide-leg full-length trousers';
+ const nested=choices=>({items:{properties:{language_tag:{type:'string'},value:{enum:choices}}}});
+ meta.schema_content.properties.closure={items:{properties:{marketplace_id:{type:'string'},type:nested(['Button','Pull On'])}}};
+ meta.schema_content.properties.rise={items:{properties:{marketplace_id:{type:'string'},style:nested(['Mid Rise','High Rise'])}}};
+ input.publicationFacts.supplierModelNumberEvidence={sourceUrl:'https://detail.1688.com/offer/123456.html'};
+ input.publicationFacts.riseTypeEvidence={source:'supplier_attribute',sourceUrl:input.publicationFacts.supplierModelNumberEvidence.sourceUrl,field:'腰型',sourceValue:'中腰',value:'Mid Rise'};
+ const setting={source:'user_configured_defaults',productId:input.productId,scope:'missing_catalogue_attribute_only',value:'Button',supplierVerified:false,instruction:'Isolated seller setting',configuredAt:'2026-11-21T15:00:00+08:00'};
+ input.publicationFacts.closureTypeEvidence=setting;
+ const read=()=>us.usProductAttributes(input,meta);
+ assert.equal(read().closure[0].type[0].value,'Button');assert.equal(read().rise[0].style[0].value,'Mid Rise');
+ input.publicationFacts.closureTypeEvidence={...setting,productId:'other'};assert.equal(read().closure,undefined);
+ input.publicationFacts.riseTypeEvidence.sourceUrl='https://detail.1688.com/offer/other.html';assert.throws(read,/同一货源/);
+});
+
 test('US pants require a single proven leg cut and serialize it using the live schema hierarchy',async()=>{
  const {input:original,prepared:input,meta,body,urls}=preparedFixture();
  input.goodsItems=input.goodsItems.slice(0,4);
@@ -147,14 +288,85 @@ test('US pants require a single proven leg cut and serialize it using the live s
  await assert.rejects(()=>us.prepareUsDraft({},original,oldRecord,async()=>assert.fail('should not certify an incomplete draft'),{
   read:async()=>oldReadback,save:async()=>assert.fail('should not repeat an old save')
  }),/美国子SKU商品属性不符.*leg/);
- input.goods.description=description('Full-length pants')+'\nLeg style: Straight';
+ input.goods.description=description('Full-length pants')+'\nLeg Style: Straight-leg';
  assert.equal(us.usProductAttributes(input,meta).leg[0].style[0].value,'Straight');
  for(const style of ['Full-length pants','Wide-leg and straight-leg assorted pants']){
   input.goods.description=description(style);
   assert.throws(()=>us.usProductAttributes(input,meta),/唯一已核实的腿型/);
  }
+ input.goods.description=description('Wide-leg pants')+'\nLeg style: Wide\nLeg Style: Straight';
+ assert.throws(()=>us.usProductAttributes(input,meta),/唯一已核实的腿型/);
  input.goods.description=description('Tapered-leg pants');
  assert.throws(()=>us.usProductAttributes(input,meta),/美国裤装实际类目不支持 leg/);
+});
+
+test('button-front pants retain the unique frozen style on every child without inferring missing styles',()=>{
+ const {prepared:input,meta,body,urls}=preparedFixture();meta.product_type_name='PANTS';
+ const style='Western wide-leg full-length trousers';
+ input.goods.description='Material: Polyester\nStyle: '+style;
+ const before=structuredClone(input);
+ const attributes=us.usProductAttributes(input,meta);
+ assert.equal(attributes.style[0].value,style);
+ const saved=us.patchUsDraftPayload(body,{usPrepared:input,usProductAttributes:attributes},urls);
+ assert.ok(saved.items.every(row=>row.attributes.style[0].value===style));
+ assert.deepEqual(input,before);
+ input.goods.description+='\nStyle: Another style';
+ assert.equal(us.usProductAttributes(input,meta).style,undefined);
+ input.goods.description='Material: Polyester';
+ assert.equal(us.usProductAttributes(input,meta).style,undefined);
+});
+
+test('US half-zip sweatshirts use evidenced collar, fit and ordinary textile declarations',()=>{
+ const {input,meta}=fixture();
+ meta.product_type_name='SWEATSHIRT';
+ const properties=meta.schema_content.properties;
+ properties.neck.items.properties.neck_style.items.properties.value.anyOf=[{type:'string'},{enum:['Collared Neck']}];
+ delete properties.neck.items.properties.neck_style.items.properties.value.enum;
+ properties.fit_type.items.properties.value.anyOf=[{type:'string'},{enum:['Regular']}];
+ properties.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable']},marketplace_id:{$ref:'#/$defs/marketplace_id'}}}};
+ input.goods.description='Style: regular-cut half-zip pullover\nCollar: Stand collar\nMaterial: 95% polyester, 5% spandex';
+ input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ const attributes=us.usProductAttributes(input,meta);
+ assert.equal(attributes.neck[0].neck_style[0].value,'Collared Neck');
+ assert.equal(attributes.fit_type[0].value,'Regular');
+ assert.equal(attributes.supplier_declared_dg_hz_regulation[0].value,'not_applicable');
+ delete input.publicationFacts.waterResistanceLevelSource;
+ assert.equal(us.usProductAttributes(input,meta).supplier_declared_dg_hz_regulation,undefined);
+});
+
+test('US faux suede button-front sweatshirts use the verified stand collar and relaxed fit without claiming percentages',()=>{
+ const {input,meta}=fixture();
+ meta.product_type_name='SWEATSHIRT';
+ const p=meta.schema_content.properties;
+ p.neck.items.properties.neck_style.items.properties.value={anyOf:[{enum:['Collared Neck']}]};
+ p.fit_type.items.properties.value={anyOf:[{enum:['Relaxed']}]};
+ p.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable']}}}};
+ input.goods.description='Style: Relaxed-fit pullover\nCollar: Tall stand collar\nFront: Four-button half placket\nMaterial: Faux suede made with polyester and elastane';
+ input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ const verified=us.usProductAttributes(input,meta);
+ assert.equal(verified.neck[0].neck_style[0].value,'Collared Neck');
+ assert.equal(verified.fit_type[0].value,'Relaxed');
+ assert.equal(verified.supplier_declared_dg_hz_regulation[0].value,'not_applicable');
+ assert.equal(verified.fabric_type[0].value,'Faux suede made with polyester and elastane');
+ input.goods.description=input.goods.description.replace('Four-button half placket','Metal front accessory');
+ assert.equal(us.usProductAttributes(input,meta).supplier_declared_dg_hz_regulation,undefined);
+});
+
+test('US hooded half-zip uses structured closure and hood lines from the frozen Listing',()=>{
+ const {input,meta}=fixture();
+ meta.product_type_name='SWEATSHIRT';
+ const p=meta.schema_content.properties;
+ p.neck.items.properties.neck_style.items.properties.value={anyOf:[{enum:['Hooded Neck']}]};
+ p.fit_type.items.properties.value={anyOf:[{enum:['Relaxed']}]};
+ p.supplier_declared_dg_hz_regulation={items:{properties:{value:{enum:['not_applicable']}}}};
+ input.goods.description='Style: Relaxed-fit hooded pullover\nMaterial: 95% polyester, 5% elastane\nClosure: Half zip\nHood: Drawstring';
+ input.publicationFacts.waterResistanceLevelSource={basis:{classification:'ordinary_apparel'}};
+ const attrs=us.usProductAttributes(input,meta);
+ assert.equal(attrs.neck[0].neck_style[0].value,'Hooded Neck');
+ assert.equal(attrs.fit_type[0].value,'Relaxed');
+ assert.equal(attrs.supplier_declared_dg_hz_regulation[0].value,'not_applicable');
+ input.goods.description=input.goods.description.replace('Closure: Half zip','Closure: Buttons');
+ assert.equal(us.usProductAttributes(input,meta).neck,undefined);
 });
 
 test('native US Save runs from serialized source and preserves original IDs, SKUs and every child gallery',()=>{

@@ -39,7 +39,7 @@ def _normalized(text):
     return re.sub(r'[\W_]+', '', unicodedata.normalize('NFKC', str(text or '')).casefold())
 
 
-def gallery_issues(images, *, shared_verified_angle=False):
+def gallery_issues(images, *, shared_verified_angle=False, seven_policy=False):
     issues = []
     layouts = defaultdict(list)
     scenes = []
@@ -57,7 +57,7 @@ def gallery_issues(images, *, shared_verified_angle=False):
             scenes.append((number, image.get('scene_direction') or {}))
 
     for layout, numbers in layouts.items():
-        if len(numbers) > 2:
+        if len(numbers) > (3 if seven_policy and layout=='human_context' else 2):
             positions = '、'.join(map(str, numbers))
             issues.append(f'第 {positions} 张使用同一类版式（{layout}），最多两张。')
 

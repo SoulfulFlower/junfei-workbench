@@ -36,7 +36,7 @@ class QualityTests(unittest.TestCase):
    with self.assertRaises(ValueError):c.resume_local_review({'id':'test','confirmed':True,'slots':[0]},{'id':'own'})
    data={'id':'test','confirmed':True,'slots':[0],'policyReview':q.POLICY}
    staged=c.resume_local_review(data,{'id':'own'})
-   with patch.object(c,'review_inputs',return_value=([],{})),patch.object(c.visual,'model_json',return_value={'decision':'warn','blockingIssues':[],'warnings':['Minor edge cast']}):c.work(staged)
+   with patch.object(c,'composition_review',return_value={'pass':True,'issues':[]}),patch.object(c,'review_inputs',return_value=([],{})),patch.object(c.visual,'model_json',return_value={'decision':'warn','blockingIssues':[],'warnings':['Minor edge cast']}):c.work(staged)
    saved=c.get('test');self.assertEqual(saved['status'],'awaiting_manual');self.assertFalse(saved.get('manual',False))
    self.assertEqual(saved['items'][0]['reviewHistory'][-1]['qc']['issues'],['tiny fringe'])
    saved['status']='needs_attention';saved['items'][0]['status']='needs_revision';c.save(saved)

@@ -1192,10 +1192,6 @@ def start(user, tid, *, save_library=False):
             check_planning_restart(c, task)
             task.update(status='running', pauseRequested=False, updated=time.time(),
                         reason='', executionId=execution_id)
-            handoff=(task.get('copyHandoff') or {}).get('codexHandoff')
-            if handoff:
-                import codex_handoff
-                codex_handoff.record(c,handoff,tid,'started')
             put(c, task)
             message = ('开始核对正式ERP目标及成品，复用原采集任务；仅保存草稿' if task.get('erpWorkflowVersion')==2 else '已请求保存钧飞产品库草稿' if save_library else
                        '开始执行已接入工具；准备检查不提交ERP')

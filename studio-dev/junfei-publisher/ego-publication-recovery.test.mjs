@@ -53,6 +53,22 @@ test('authorized media recovery verifies eight original assets and their reporte
  assert.notEqual(result.originalAcceptedSourceEvidence,f.record.sourceEvidence);
 });
 
+test('exact US nonblocking apparel advisory preserves media scope and cannot create another failed child',async()=>{
+ const f=fixture(),row=f.failed.data.items.find(r=>r.sku==='Original-Brown-M');
+ const advisory={code:'18448',severity:'WARNING',attributeNames:['material','pattern','special_feature'],categories:['MISSING_ATTRIBUTE','PRODUCT'],message:'您提交的内容缺少一些关键属性：material, pattern, special_feature。 缺少这些属性不会阻止您的商品在亚马逊上展示。 然而，这会影响您的商品信息的整体质量。'};
+ row.extra.message.push(advisory);f.failed.data.errors.push({...advisory,sku:row.sku,solution:''});rebind(f);
+ let submits=0;
+ const result=await recoverNativeMediaPublication({},f.input,f.record,async()=>{}, {amendment:f.amendment,read:async()=>f.failed,remote:remoteProof,submit:async(_p,_i,r)=>{submits++;acceptedRequest(r);}});
+ assert.equal(submits,1);assert.equal(result.preflight.urlCount,15);assert.equal(result.requestAccepted,true);
+ const accepted=structuredClone(f.accepted),healthy=accepted.data.items[0];healthy.extra.message=[advisory];accepted.data.errors=[{...advisory,sku:healthy.sku,solution:''}];
+ const proof=verifyPublication(accepted,f.input,'202');assert.equal(proof.warnings.length,1);assert.deepEqual(proof.warnings[0].attributeNames,['material','pattern','special_feature']);
+ for(const mutate of [a=>a.severity='ERROR',a=>a.attributeNames=['material'],a=>a.enforcements=[],a=>a.message+=' Restricted',a=>a.categories=['PRODUCT','INVALID_IMAGE']]){
+  const invalid=structuredClone(accepted);mutate(invalid.data.errors[0]);mutate(invalid.data.items[0].extra.message[0]);assert.throws(()=>verifyPublication(invalid,f.input,'202'));
+ }
+ const conflicting=structuredClone(accepted);delete conflicting.data.errors[0].attributeNames;
+ const conflict=publicationFailureObservation(conflicting,f.input,'202');assert.equal(conflict.messages[0].advisoryMetadataUnverified,true);
+});
+
 test('wrong, missing or stale authorization never reaches media requests or native submission',async()=>{
  for(const alter of [f=>delete f.amendment.jobId,f=>f.amendment.accountId=3,f=>f.amendment.publishId='303',f=>f.amendment.snapshotSha256='other',
   f=>f.amendment.failureResponseFingerprint='0'.repeat(64),f=>f.amendment.failedChildIds.pop(),f=>f.amendment.authorizedAt='2026-11-16',

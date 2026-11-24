@@ -94,6 +94,17 @@ test('native guard accepts the observed five-key casefold check and one original
  const readOnly=guardFixture('check');assert.throws(()=>readOnly.send(nativeScope,origin+'apply'));assert.equal(readOnly.sent.length,0);
 });
 
+test('rejected exemption scope records only public allowed fields without sending or exposing extra values',()=>{
+ const f=guardFixture('check');
+ assert.throws(()=>f.send({...nativeScope,country_code:'US',private_value:'never persist this value'}));
+ assert.equal(f.sent.length,0);
+ const rejection=JSON.parse(vm.runInContext('JSON.stringify(window.__ukExemptionAction.rejectedRequest)',f.context));
+ assert.equal(rejection.scope.country_code.value,'US');
+ assert.equal(rejection.scope.private_value,undefined);
+ assert.equal(JSON.stringify(rejection).includes('never persist this value'),false);
+ assert.ok(rejection.keys.includes('private_value'));
+});
+
 test('native guard rejects mutation through fetch and check parsing requires the true available status map',async()=>{
  const f=guardFixture();await assert.rejects(()=>vm.runInContext('window.fetch("https://app.junfeikuajing.com/api/amazon/category/upc-exemption/apply",{method:"POST"})',f.context));assert.equal(f.sent.length,0);
  const g=fixture(),identity=assertUkExemptionContext(g.prepared,g.meta,g.ui),o=g.observation('available');o.request.response.body.data.status_map={available:'Different'};assert.throws(()=>parseUkExemptionCheck(o,identity));

@@ -20,7 +20,7 @@ datas += [(str(app / 'index.html'), '.'), (str(app / 'assets'), 'assets'),
           (str(app / 'visual-ui/NOTICE.md'), 'visual-ui'),
           (str(stage / 'portable-runtime'), 'portable-runtime'), (node, '.')]
 a = Analysis([str(app / 'desktop_launcher.py')], pathex=[str(app)], binaries=[], datas=datas,
-             hiddenimports=['agent_library', 'portable_support', 'runpy', 'jsonschema', 'referencing'], hookspath=[],
+             hiddenimports=['agent_library', 'portable_support', 'runpy'], hookspath=[],
              hooksconfig={}, runtime_hooks=[], excludes=[], noarchive=False, optimize=0)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='AmazonAgentPortable',

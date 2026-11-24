@@ -1,9 +1,6 @@
 """Stable human-facing SKU; internal product IDs stay unchanged."""
 from datetime import datetime,timezone,timedelta
 import re
-
-PARENT_SKU = re.compile(r'[A-Za-z0-9_-]{1,40}')
-PARENT_SKU_ERROR = '父 SKU 仅支持 1–40 位英文字母、数字、横线和下划线'
 BOUNDS=[(-20319,'A'),(-20284,'B'),(-19776,'C'),(-19219,'D'),(-18711,'E'),(-18527,'F'),(-18240,'G'),(-17923,'H'),(-17418,'J'),(-16475,'K'),(-16213,'L'),(-15641,'M'),(-15166,'N'),(-14923,'O'),(-14915,'P'),(-14631,'Q'),(-14150,'R'),(-14091,'S'),(-13319,'T'),(-12839,'W'),(-12557,'X'),(-11848,'Y'),(-11056,'Z')]
 def initials(name):
     out=[]
@@ -20,14 +17,10 @@ def initials(name):
 def ensure(product,user,used):
     if product.get('sku'):
         previous=product['sku']
-        if product.get('skuSource') != 'manual' and re.fullmatch(r'[A-Za-z]{1,26}-\d{8}-\d{6}',previous):
-            compact = previous.replace('-','')
-            if compact not in used:
-                product['sku'] = compact
-                used.discard(previous)
-                used.add(compact)
+        if re.fullmatch(r'[A-Za-z]+-\d{8}-\d{6}',previous) and previous.replace('-','') not in used:
+            product['sku']=previous.replace('-','');used.discard(previous);used.add(product['sku'])
         return
-    prefix=initials(user.get('name') or user.get('username',''))[:26]
+    prefix=initials(user.get('name') or user.get('username',''))
     now=datetime.now(timezone(timedelta(hours=8)))
     sku=prefix+now.strftime('%Y%m%d%H%M%S')
     while sku in used:

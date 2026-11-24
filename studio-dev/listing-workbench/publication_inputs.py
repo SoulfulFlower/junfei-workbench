@@ -10,6 +10,11 @@ DEFAULT_PUBLICATION_FACTS_SOURCE = {
     'scope': 'all_new_publication_jobs',
     'instruction': '用户要求所有产品新发布统一选择原产国中国、护理机洗，后续不重复询问；原产品字段仅作来源追溯，不覆盖统一刊登设置。',
 }
+ITEM_CONDITION_DEFAULT_SOURCE = {
+    'source': 'user_configured_defaults', 'configuredAt': '2026-11-20',
+    'scope': 'all_new_publication_jobs',
+    'instruction': '更新流程 所有货物都是全新',
+}
 WATER_RESISTANCE_DEFAULT_SOURCE = {
     'source': 'user_configured_defaults', 'configuredAt': '2026-11-17',
     'scope': 'ordinary_apparel_without_explicit_water_claim_new_publication_jobs',
@@ -105,7 +110,8 @@ def publication_facts(product):
 
     New publication origin/care fields use the user's selected global policy.
     Old product values remain internal provenance, never listing overrides.
-    Model facts come only from the bound supplier, not competitor templates.
+    Supplier model numbers stay source-bound; an explicit seller model name
+    may use this product's own parent SKU without claiming a supplier number.
     """
     facts = copy.deepcopy(DEFAULT_PUBLICATION_FACTS)
     facts['countryOfOriginSource'] = copy.deepcopy(DEFAULT_PUBLICATION_FACTS_SOURCE)
@@ -148,13 +154,81 @@ def publication_facts(product):
             evidence['retrievedAt'] = supplier['retrievedAt']
         facts.update(supplierModelNumber=number, modelName=number,
                      supplierModelNumberEvidence=copy.deepcopy(evidence), modelNameEvidence=copy.deepcopy(evidence))
+    if (same_source and product.get('cat') == '服装' and isinstance(attributes, dict)
+            and re.fullmatch(r'https://detail\.1688\.com/offer/\d+\.html', supplier_url)):
+        weave_choices = {'针织': 'Knit', '梭织': 'Woven'}
+        weave_fields = {field: attributes[field].strip() for field in ('织法', '工艺')
+                        if isinstance(attributes.get(field), str) and attributes[field].strip() in weave_choices}
+        if len(set(weave_fields.values())) == 1:
+            field, source_value = next(iter(weave_fields.items()))
+            facts['weaveTypeEvidence'] = {'source': 'supplier_attribute', 'sourceUrl': supplier_url,
+                                          'field': field, 'sourceValue': source_value,
+                                          'value': weave_choices[source_value]}
+    # A seller-selected catalogue value is distinct from supplier evidence.
+    # Consume only an explicit product-bound setting, never invent a default
+    # merely because the supplier did not specify the weave.
+    rise_choices = {'高腰':'High Rise', '中腰':'Mid Rise', '低腰':'Low Rise'}
+    if same_source and isinstance(attributes, dict) and attributes.get('腰型') in rise_choices:
+        facts['riseTypeEvidence'] = {'source':'supplier_attribute','sourceUrl':supplier_url,
+                                    'field':'腰型','sourceValue':attributes['腰型'],
+                                    'value':rise_choices[attributes['腰型']]}
+    defaults = product.get('publicationAttributeDefaults') or {}
+    if not isinstance(defaults, dict):
+        raise ValueError('目录经营默认格式无效')
+    assigned = defaults.get('modelName')
+    if assigned is not None and 'modelName' not in facts:
+        sku = product.get('sku')
+        valid_time = False
+        if isinstance(assigned, dict):
+            try:
+                when = datetime.fromisoformat(str(assigned.get('configuredAt', '')).replace('Z', '+00:00'))
+                valid_time = when.tzinfo is not None and when.utcoffset() is not None
+            except (ValueError, TypeError):
+                pass
+        if (product.get('cat') != '服装' or not isinstance(assigned, dict)
+                or not product.get('id') or assigned.get('productId') != product['id']
+                or not isinstance(sku, str) or not sku.strip() or sku != sku.strip()
+                or len(sku) > 120 or re.search(r'[\x00-\x1f\x7f]', sku)
+                or assigned.get('value') != sku
+                or assigned.get('source') != 'user_configured_defaults'
+                or assigned.get('scope') != 'missing_catalogue_attribute_only'
+                or assigned.get('supplierVerified') is not False or not valid_time
+                or not isinstance(assigned.get('instruction'), str)
+                or not assigned['instruction'].strip()):
+            raise ValueError('卖家型号名称须绑定本产品实际父SKU及明确经营授权')
+        facts['modelName'] = sku
+        facts['modelNameEvidence'] = {**copy.deepcopy(assigned), 'assignment': 'seller_parent_sku'}
+    for field, evidence_key, selected_value in [('weaveType','weaveTypeEvidence','Plain'),
+                                                ('closureType','closureTypeEvidence','Button')]:
+        configured_weave = defaults.get(field)
+        if configured_weave is None or evidence_key in facts:
+            continue
+        valid_time = False
+        if isinstance(configured_weave, dict):
+            try:
+                when = datetime.fromisoformat(str(configured_weave.get('configuredAt', '')).replace('Z', '+00:00'))
+                valid_time = when.tzinfo is not None
+            except (ValueError, TypeError):
+                pass
+        if (product.get('cat') != '服装' or not isinstance(configured_weave, dict)
+                or not product.get('id') or configured_weave.get('productId') != product['id']
+                or configured_weave.get('source') != 'user_configured_defaults'
+                or configured_weave.get('scope') != 'missing_catalogue_attribute_only'
+                or configured_weave.get('value') != selected_value
+                or configured_weave.get('supplierVerified') is not False or not valid_time
+                or not isinstance(configured_weave.get('instruction'), str)
+                or not configured_weave['instruction'].strip()):
+            raise ValueError('目录经营默认缺少本品明确授权或来源区分')
+        facts[evidence_key] = copy.deepcopy(configured_weave)
     title = supplier.get('title')
-    if (not _add_confirmed_item_condition(facts, product)
-            and same_source and isinstance(title, str) and '新品' in title
-            and not re.search(r'非新品|非全新|二手|翻新|旧货', title)):
-        facts['itemCondition'] = 'new_new'
-        facts['itemConditionEvidence'] = {'source': 'supplier_title', 'path': 'sourceImport.supplier.title',
-                                          'sourceUrl': supplier_url, 'text': title}
+    if not _add_confirmed_item_condition(facts, product):
+        source_title = title if same_source and isinstance(title, str) else ''
+        if not re.search(r'非新品|非全新|二手|翻新|旧货', source_title):
+            facts['itemCondition'] = 'new_new'
+            facts['itemConditionEvidence'] = copy.deepcopy(ITEM_CONDITION_DEFAULT_SOURCE)
+            if '新品' in source_title:
+                facts['itemConditionEvidence'] = {'source': 'supplier_title', 'path': 'sourceImport.supplier.title',
+                                                  'sourceUrl': supplier_url, 'text': source_title}
     special = product.get('specialSizeType')
     if special is not None and (not isinstance(special, str) or len(special) > 2200):
         raise ValueError('特殊尺码分类须为明确的产品资料')
@@ -189,7 +263,7 @@ def us_publication_missing_facts(facts):
     required = {
         'countryOfOrigin': '本款原产国',
         'careInstructions': '本款护理方式',
-        'modelName': '本款实际供应商型号',
+        'modelName': '本款型号名称',
         'itemCondition': '本款实际商品成色',
         'specialSizeType': '本款尺码分类',
     }

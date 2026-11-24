@@ -32,6 +32,17 @@ class LocalColourTests(unittest.TestCase):
   return {'colorKey':key,'reference':self.groups[key]['references'][0]['url'],'confirmed':True}
  def configure(self,key='beige'):
   return local.configure({**self.request(key),'target':'#e0d9ce','exposure':-3,'texture':.7},self.product)
+ def test_agent_patch_recipe_binds_verified_photo_hash_and_asin_without_human_approval(self):
+  evidence={'reference':self.request()['reference'],'box':[.3,.4,.4,.6],'target':'#e0d9ce','sourceSha256':'a'*64}
+  with patch('colour_reference.sample',return_value=evidence):
+   recipe=local.configure({**self.request(),'target':evidence['target'],'referenceSample':evidence,'reviewerType':'agent'},self.product)
+  self.assertEqual(recipe['source'],'agent_verified_reference_patch');self.assertEqual(recipe['sourceSha256'],'a'*64)
+  self.assertEqual(recipe['referenceSourceAsin'],'TEST-beige');self.assertFalse(recipe['humanReviewed'])
+ def test_agent_patch_rejects_changed_photo_or_arbitrary_rgb(self):
+  evidence={'reference':self.request()['reference'],'box':[.3,.4,.4,.6],'target':'#e0d9ce','sourceSha256':'a'*64}
+  for change in [{'sourceSha256':'b'*64},{'target':'#000000'},{'reference':'https://example.test/other.jpg'}]:
+   with patch('colour_reference.sample',return_value=evidence),self.assertRaises(ValueError):
+    local.configure({**self.request(),'target':evidence['target'],'referenceSample':{**evidence,**change},'reviewerType':'agent'},self.product)
  def selection(self,slot,revision=0):
   source=pixel.source_row(self.context['items'][slot]);a=np.zeros((40,40),dtype='uint8');a[:,8:]=255
   encode=lambda arr:base64.b64encode(pixel.png(Image.fromarray(arr))).decode()
@@ -127,7 +138,7 @@ class LocalColourTests(unittest.TestCase):
    out=np.asarray(pixel.image(i['image']));original=np.asarray(pixel.image(i['sourceUpload']))
    np.testing.assert_array_equal(out[:,:8],original[:,:8]);self.assertFalse(i['localCorrection']['humanReviewed'])
   saved['validated']=True
-  with patch.object(colours,'review_inputs',return_value=([],{})),patch.object(colours.visual,'model_json',return_value={'decision':'warn','blockingIssues':[],'warnings':['tiny edge']}):colours.work(saved)
+  with patch.object(colours,'composition_review',return_value={'pass':True,'issues':[]}),patch.object(colours,'review_inputs',return_value=([],{})),patch.object(colours.visual,'model_json',return_value={'decision':'warn','blockingIssues':[],'warnings':['tiny edge']}):colours.work(saved)
   self.assertEqual(colours.get(s['id'])['status'],'awaiting_manual')
  def test_passed_slots_keep_exact_image_and_only_failed_slot_requires_a_mask(self):
   self.configure();self.selection(1);old=self.previous(['awaiting_manual','needs_revision']);kept=copy.deepcopy(old['items'][0])

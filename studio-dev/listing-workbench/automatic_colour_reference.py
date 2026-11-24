@@ -5,7 +5,7 @@ from PIL import Image,ImageOps
 import garment_auto
 import image_provider
 
-VERSION='variant-main-cloth-colour-v1'
+VERSION='variant-main-cloth-colour-v2'
 
 
 def main_reference(group,preferred=None):
@@ -33,7 +33,8 @@ def colour(image,mask):
     a&=rgba[:,:,3]>230
     core=cv2.erode(a.astype('uint8'),np.ones((5,5),'uint8'))>0
     if core.sum()<50:core=a
-    if core.sum()<50:raise ValueError('变体主图中没有足够的可见衣料，未自动猜色')
+    minimum=max(50,int((rgba[:,:,3]>230).sum()*.005))
+    if core.sum()<minimum:raise ValueError('变体主图中没有足够的可见衣料，请核对真实衣料区域后取色，未自动猜色')
     rgb=rgba[:,:,:3][core];rgb=rgb[::max(1,len(rgb)//12000)]
     lab=cv2.cvtColor(rgb.astype('float32')[None]/255,cv2.COLOR_RGB2LAB)[0]
     low,high=np.percentile(lab[:,0],[30,70]);middle=lab[(lab[:,0]>=low)&(lab[:,0]<=high)]

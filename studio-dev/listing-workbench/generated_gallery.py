@@ -77,20 +77,17 @@ def inspect(raw):
             'sha256':hashlib.sha256(raw).hexdigest()}
 
 
-def image_bytes(job, index, *, local_only=False):
+def image_bytes(job, index):
     url = job['images'][index]
     if not isinstance(url, str):
         raise ValueError('生成结果地址无效')
     cache = image_provider.ROOT / 'generated-gallery-results'
-    if not local_only:
-        cache.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(json.dumps([job['id'], index, url]).encode()).hexdigest()
     path = cache / (key + '.image')
-    if local_only and not path.is_file() and not url.startswith('/uploads/'):
-        raise ValueError('请先缓存已选套图，再核对草稿')
     raw = path.read_bytes() if path.is_file() else download(url)
     info = inspect(raw)
-    if not local_only and not path.exists():
+    if not path.exists():
         tmp = path.with_suffix('.tmp-' + uuid.uuid4().hex)
         tmp.write_bytes(raw)
         tmp.replace(path)
@@ -129,7 +126,7 @@ def selected(product, current_project_id):
     return result
 
 
-def export_images(product, current_project_id, *, local_only=False):
+def export_images(product, current_project_id):
     rows = selected(product, current_project_id)
     if rows is None:
         return None
@@ -137,7 +134,7 @@ def export_images(product, current_project_id, *, local_only=False):
     reviewed = agent_review.gallery_approved(product, rows)
     output = []
     for slot, (row, job, index) in enumerate(rows):
-        raw, info = image_bytes(job, index, local_only=True) if local_only else image_bytes(job, index)
+        raw, info = image_bytes(job, index)
         if row.get('sha256') and row['sha256'] != info['sha256']:
             raise ValueError('生成图片与已核对文件哈希不符，未导出')
         raw, info = prepare_delivery(raw)

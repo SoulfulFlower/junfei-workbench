@@ -1,23 +1,18 @@
 // Compatibility adapter: retain the existing mount order and shared workspace hooks.
 const mountBeforeColourSets=mountImageGeneration;
 mountImageGeneration=function(){mountBeforeColourSets();mountColourVariants()};
-// Focused work areas: retain original controls and their event handlers.
-let visualLayoutTab='master';
+// Current image workspace is primary; prior batch controls remain explicitly accessible.
 const mountBeforeFocusedLayout=mountImageGeneration;
 mountImageGeneration=function(){
  mountBeforeFocusedLayout();
  const host=document.getElementById('nativeVisualStudio'),asset=document.getElementById('assetInput')?.closest('section');if(!host||!asset)return;
- const fold=document.createElement('details');fold.className='panel box workspace-materials';
- const summary=document.createElement('summary');summary.textContent='补传商品实拍 · 关联变体颜色';asset.before(fold);fold.append(summary,asset);
+ const materials=document.createElement('details');materials.className='panel box workspace-materials';
+ const summary=document.createElement('summary');summary.textContent='商品素材与颜色资料';materials.append(summary,asset);host.before(materials);
  const colors=host.nextElementSibling;if(!colors?.classList.contains('colour-variant-panel'))return;
- const advanced=colors.querySelector('.colour-advanced');
- const nav=document.createElement('div');nav.className='workspace-modebar';nav.setAttribute('aria-label','图片制作方式');
- for(const [key,label]of [['master','母版套图 · 策划 / 生成 / 审核'],['colors','变体换色 · 复用母版']]){const b=document.createElement('button');b.className='btn';b.textContent=label;b.onclick=()=>select(key);b.dataset.mode=key;nav.append(b)}
- function select(key){
-  visualLayoutTab=key;host.hidden=key!=='master';colors.hidden=key!=='colors';
-  nav.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===key)));
- }
- fold.before(nav);advanced.append(fold);select(visualLayoutTab);
+ const history=document.createElement('details');history.className='panel box image-workflow-compat';history.dataset.imageCompatibility='true';
+ const title=document.createElement('summary');title.textContent='历史母版换色与 SKU 关联';
+ const note=document.createElement('p');note.className='sub';note.textContent='查看和接续原母版的颜色任务及关联记录。新图片制作使用上方商品作图。';
+ colors.before(history);history.append(title,note,colors);colors.hidden=false;host.hidden=false;
 };
 // One research entry: keywords and review insights share the same ASIN/site input.
 function arrangeUnifiedResearch(){

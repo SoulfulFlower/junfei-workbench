@@ -83,3 +83,39 @@ test('existing migrated source facts are preserved and non-SHIRT schemas retain 
  assert.deepEqual(original,before);f.meta.product_type_name='COAT';delete f.input.ukPreparation;
  assert.deepEqual(supplementUkRequiredAttributes(original,f.input,f.meta,f.prepared),{attributes:original,evidence:{}});
 });
+
+test('actual ordinary women Blouses leaf uses unique crew-neck pullover facts and same-source supplier weave',()=>{
+ const f=fixture(),url='https://detail.1688.com/offer/12345.html';
+ f.input.goods.sourceUrl=url;f.input.goods.description='Style: Western pullover\nNeckline: Crew neck\nTexture: Faux suede\nMaterial: 95% Polyester, 5% Elastane';
+ f.input.destination.categoryHints.path='Clothing, Shoes & Jewelry > Women > Clothing > Tops, Tees & Blouses > Blouses & Button-Down Shirts > Blouses';
+ f.meta.schema_content.$defs.marketplace_id.default=f.prepared.destination.marketplaceId;
+ f.input.publicationFacts={waterResistanceLevel:'not_water_resistant',supplierModelNumberEvidence:{sourceUrl:url},
+  weaveTypeEvidence:{source:'supplier_attribute',sourceUrl:url,field:'工艺',sourceValue:'针织',value:'Knit'}};
+ const choice={text:'Fashion Women Clothing Tops T-Shirts & Blouses Blouses & Shirts Blouses',value:'1,2,3,4,5,6'};
+ const run=()=>supplementUkRequiredAttributes({},f.input,f.meta,f.prepared,choice);
+ const result=run();assert.equal(result.attributes.collar_style[0].value,'Collarless');assert.equal(result.attributes.item_type_name[0].value,'Blouse');
+ assert.equal(result.attributes.weave_type[0].value,'Knit');assert.equal(result.evidence.collar_style.inferred,true);
+ assert.equal(result.evidence.weave_type.basis.sourceUrl,url);assert.equal(result.attributes.outer[0].material[0].value,'95% Polyester, 5% Elastane');
+ for(const change of [()=>f.input.publicationFacts.weaveTypeEvidence.sourceUrl='https://detail.1688.com/offer/999.html',
+   ()=>choice.text='Fashion Women Clothing Tops T-Shirts & Blouses T-Shirts',()=>f.input.goods.description+='\nCollar: Stand collar']){
+  const original=structuredClone(f.input),old=choice.text;change();assert.throws(run,/明确依据/);f.input=original;choice.text=old;
+ }
+ f.input.goods.description+='\nNeckline: Crew neck';assert.throws(run,/明确依据/);
+});
+
+test('UK faux suede sweatshirt keeps synthetic outer fabric and requires weave evidence for the same supplier offer',()=>{
+ const {input,prepared,meta}=fixture();
+ meta.product_type_name='SWEATSHIRT';
+ meta.schema_content.$defs.marketplace_id.default=prepared.destination.marketplaceId;
+ input.goods.sourceUrl='https://detail.1688.com/offer/100.html';
+ input.goods.description='Style: Relaxed-fit pullover\nFront: Four-button half placket\nMaterial: Faux suede made with polyester and elastane';
+ const supplement=()=>supplementUkRequiredAttributes({},input,meta,prepared);
+ const original=supplement();
+ assert.equal(original.attributes.item_type_name[0].value,'Sweatshirt');
+ assert.equal(original.attributes.outer[0].material[0].value,'Synthetic');
+ assert.equal(original.attributes.weave_type,undefined);
+ input.ukPreparation={sweatshirtWeave:{value:'Woven',source:'user_confirmation',productId:input.productId,sourceUrl:'https://detail.1688.com/offer/999.html'}};
+ assert.equal(supplement().attributes.weave_type,undefined);
+ input.ukPreparation.sweatshirtWeave.sourceUrl=input.goods.sourceUrl;
+ assert.equal(supplement().attributes.weave_type[0].value,'Woven');
+});

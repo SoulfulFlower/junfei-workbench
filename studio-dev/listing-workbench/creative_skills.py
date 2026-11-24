@@ -43,7 +43,7 @@ def save(data, defaults=None, db_path=None):
 def select(product):
     import re
     text=' '.join(str(product.get(k,'')) for k in ('name','cat','style'))
-    category='apparel' if re.search(r'服装|夹克|外套|卫衣|衬衫|开衫|针织衫|毛衣|裙|裤|jacket|coat|hoodie|shirt|cardigan|sweater|dress|trousers|apparel',text,re.I) else 'household'
+    category='apparel' if re.search(r'服装|女装|男装|童装|上衣|夹克|外套|卫衣|衬衫|开衫|针织衫|毛衣|连体衣|裙|裤|卫裤|睡衣|泳衣|内衣|jacket|coat|hoodie|shirt|cardigan|sweater|dress|trousers|apparel|\b(?:clothing|blouses?|skirts?|pants|shorts|jeans|leggings|sleepwear|swimwear|jumpsuits?)\b',text,re.I) else 'household'
     return {**current(),'category':category}
 
 def instruction(snapshot,stage):

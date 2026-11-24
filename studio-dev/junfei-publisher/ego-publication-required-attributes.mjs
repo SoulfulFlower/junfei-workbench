@@ -105,7 +105,31 @@ export async function readRequiredAttributesSource(page,input,publishId){
 
 export function patchRequiredAttributesSavePayload(body,plan){
  const out=patchMainImageSavePayload(body,plan);out.attributes=plan.attributes.parent;
- for(const row of out.items){const attrs=plan.attributes.children[String(row.id)];if(!attrs)throw Error('必填保存缺少原子体属性');row.attributes=attrs;}
+ const mains=plan.replaceMains??(plan.replaceMain?[plan.replaceMain]:[]);
+ if(new Set(mains.map(entry=>String(entry.id))).size!==mains.length||mains.some(entry=>!out.items.some(row=>String(row.id)===String(entry.id))))throw Error('原主图替换找不到准确子SKU');
+ const parent=plan.replaceParentMain;
+ if(parent){
+  if(out.sku!==parent.sku||out.main_image!==parent.before||out.images?.[0]!==parent.before||out.images.includes(parent.after)||
+   out.attributes.main_product_image_locator?.[0]?.media_location!==parent.after)throw Error('原父体主图替换不符');
+  out.main_image=parent.after;out.images[0]=parent.after;
+ }
+ const additional=plan.replaceAdditional??[];
+ if(new Set(additional.map(entry=>`${entry.id}:${entry.position}`)).size!==additional.length||additional.some(entry=>!out.items.some(row=>String(row.id)===String(entry.id))))throw Error('附图替换存在未知或重复图位');
+ for(const row of out.items){
+  const attrs=plan.attributes.children[String(row.id)];if(!attrs)throw Error('必填保存缺少原子体属性');row.attributes=attrs;
+  const replace=mains.find(entry=>String(entry.id)===String(row.id));
+  if(replace){
+   if(row.sku!==replace.sku||row.main_image!==replace.before||row.images?.[0]!==replace.before||row.images.length!==7||
+      replace.before===replace.after||row.images.includes(replace.after)||attrs.main_product_image_locator?.[0]?.media_location!==replace.after)throw Error('原子SKU主图替换不符');
+   row.main_image=replace.after;row.images[0]=replace.after;
+  }
+  for(const entry of additional.filter(change=>String(change.id)===String(row.id))){
+   const position=entry.position-1;
+   if(row.sku!==entry.sku||!Number.isInteger(position)||position<1||position>6||row.images?.length!==7||
+      row.images[position]!==entry.before||row.images.includes(entry.after))throw Error('原子SKU附图替换不符');
+   row.images[position]=entry.after;
+  }
+ }
  return out;
 }
 function installGuardBody(plan){
@@ -152,9 +176,9 @@ export function nativeSourceSaveReady(p){
   ![...document.querySelectorAll('.el-message-box')].some(e=>e.getBoundingClientRect().width);
 }
 
-export async function submitNativeRequiredAttributesSave(page,input,record,persist,{source,planned,amendment,armSaveIntent}){
+export async function submitNativeRequiredAttributesSave(page,input,record,persist,{source,planned,amendment,armSaveIntent,replaceMain,replaceMains,replaceAdditional,replaceParentMain}){
  const j=record.requiredAttributeRepair;if(!j||j.saveIntent||j.nativeRequests?.length||typeof armSaveIntent!=='function')throw Error('必填保存缺少点击前持久意图回调或已有意图');
- const plan={source,guardId:amendment.id,variationFields:input.destination.variationFields,attributes:{parent:planned.extra.attributes,children:Object.fromEntries(planned.items.map(r=>[String(r.id),r.extra.attributes]))}};
+ const plan={source,guardId:amendment.id,variationFields:input.destination.variationFields,replaceMain,replaceMains,replaceAdditional,replaceParentMain,attributes:{parent:planned.extra.attributes,children:Object.fromEntries(planned.items.map(r=>[String(r.id),r.extra.attributes]))}};
  await page.waitForFunction(nativeSourceSaveReady,{url:'https://www.junfeikuajing.com/#/amazon/product/'+source.id+'?type=publish',store:input.store,title:source.title,skus:source.items.map(r=>r.sku)},{timeout:60000});
  try{const installed=await page.evaluate(installRequiredAttributesSaveGuard,plan),proof=await page.evaluate(requiredAttributesSaveSnapshot);
   if(!installed?.installed||!guardOk(proof,amendment.id))throw Error('必填保存护栏未绑定，未点击');j.guardInstallProof=proof;await persist();
@@ -163,7 +187,10 @@ export async function submitNativeRequiredAttributesSave(page,input,record,persi
   if(!j.saveIntent||!guardOk(await page.evaluate(requiredAttributesSaveSnapshot),amendment.id))throw Error('保存意图持久化后护栏失效');await page.click(selector);
   await page.waitForFunction(()=>window.__requiredAttributesSave?.requests.some(r=>r.response)||window.__requiredAttributesSave?.error||[...document.querySelectorAll('.el-message-box')].some(e=>e.getBoundingClientRect().width),undefined,{timeout:20000});
   const boxes=await page.evaluate(()=>[...document.querySelectorAll('.el-message-box')].filter(e=>e.getBoundingClientRect().width).map(e=>e.innerText));
-  if(boxes.length){if(boxes.length!==1||!boxes[0].includes('颜色')||!boxes[0].includes('不在亚马逊选项中。确定要保存吗？')||/发布|删除/.test(boxes[0])||![...new Set(input.goodsItems.map(r=>r.color))].every(c=>boxes[0].includes(c)))throw Error('非原颜色确认，未继续');
+  if(boxes.length){
+   const list=boxes[0].match(/^提示\s+颜色[：:]\s*([^\r\n]+)\s+不在亚马逊选项中。确定要保存吗？\s+取消\s*确定\s*$/)?.[1];
+   const confirmedColors=list?.split(/[，,]/).map(color=>color.trim()),originalColors=new Set(input.goodsItems.map(r=>r.color));
+   if(boxes.length!==1||!confirmedColors?.length||confirmedColors.some(color=>!originalColors.has(color)))throw Error('非原颜色确认，未继续');
    j.enumConfirmation=boxes[0];await persist();await page.waitForFunction(requiredAttributesConfirmationStable,amendment.id,{timeout:10000});
    const confirm=await page.evaluate(()=>{const boxes=[...document.querySelectorAll('.el-message-box')].filter(e=>e.getBoundingClientRect().width),es=boxes.length===1?[...boxes[0].querySelectorAll('button')].filter(b=>!b.disabled&&b.innerText.trim()==='确定'):[];if(es.length!==1)throw Error('原颜色确认不唯一');es[0].setAttribute('data-required-confirm','true');return '[data-required-confirm]';});
    await page.focus(confirm);

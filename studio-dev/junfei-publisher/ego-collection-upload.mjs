@@ -10,7 +10,8 @@ export function managedUploadKey(generated,uid,asset){
  return prefix+'s_'+asset.sha256.slice(0,32)+(asset.mime==='image/jpeg'?'.jpg':'.png');
 }
 
-export async function stageFinishedUploads(page,input,record,persist){
+export async function stageFinishedUploads(page,input,record,persist,{distinctFrom=null}={}){
+ if(distinctFrom&&(input.assets.length!==1||!(new URL(distinctFrom).pathname.startsWith('/u/'+input.destination.erpUserId+'/'))))throw Error('独立ERP更正对象只允许一个原账号来源图片');
  record.uploads??={};const urls={};
  // Old successful receipts are adopted by hash, not by a product-specific file.
  for(const i of record.imageChecks||[])if(i.remote?.sha256===i.sha256&&!record.uploads[i.sha256])record.uploads[i.sha256]={url:i.url,status:'verified',remote:i.remote};
@@ -30,7 +31,7 @@ export async function stageFinishedUploads(page,input,record,persist){
   if(!formOpen){await page.goto('https://www.junfeikuajing.com/#/product/add');await page.waitForSelector('input[placeholder="请输入品牌名"]',{state:'visible'});formOpen=true;}
   record.phase='上传成品图片 '+(Object.keys(urls).length+1)+'/'+input.assets.length;await persist();
   const filename=path.basename(asset.path);
-  await page.evaluate(({filename,uid,asset,previousUrl,keyFunction})=>{
+  await page.evaluate(({filename,uid,asset,previousUrl,distinctFrom,keyFunction})=>{
    if(window.__studioUpload)throw Error('已有图片上传正在处理');
    const keyFor=(0,eval)('('+keyFunction+')'),open=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send,targets=new WeakMap();
    const s={open,send,pending:null,result:null,error:null,released:false,feedback:[],fileInput:null};window.__studioUpload=s;
@@ -54,7 +55,9 @@ export async function stageFinishedUploads(page,input,record,persist){
    XMLHttpRequest.prototype.send=function(body){const origin=targets.get(this);if(!origin)return send.call(this,body);
     try{
      if(!(body instanceof FormData)||body.get('file')?.name!==filename||s.pending)throw Error('非本次图片或重复上传');
-     const key=keyFor(body.get('key'),uid,asset),url=origin+'/'+key;
+     const generated=body.get('key'),stable=keyFor(generated,uid,asset);
+     const key=distinctFrom?String(generated):stable,url=origin+'/'+key;
+     if(distinctFrom&&(!/^[A-Za-z0-9_-]+\.(?:png|jpe?g)$/i.test(key.split('/').pop())||new URL(url).pathname===new URL(distinctFrom).pathname))throw Error('钧飞原生更正对象与原图相同或路径无效');
      if(previousUrl&&previousUrl.includes('/studio_')&&url!==previousUrl)throw Error('旧图片跨上传目录失效，不能改变已有提交的图片地址');
      body.set('key',key);body.set('name',key.split('/').pop());
      const xhr=this;s.pending={url,key};
@@ -62,7 +65,7 @@ export async function stageFinishedUploads(page,input,record,persist){
      s.release=()=>{if(s.released)throw Error('禁止重复发送上传');s.released=true;xhr.addEventListener('loadend',()=>{s.result={status:xhr.status};},{once:true});return send.call(xhr,body);};
     }catch(e){s.error=e.message;throw e;}
    };
-  },{filename,uid:input.destination.erpUserId,asset:{sha256:asset.sha256,mime:asset.mime},previousUrl:compact?null:prior?.url,keyFunction:managedUploadKey.toString()});
+  },{filename,uid:input.destination.erpUserId,asset:{sha256:asset.sha256,mime:asset.mime},previousUrl:compact?null:prior?.url,distinctFrom,keyFunction:managedUploadKey.toString()});
   try{
    await page.setInputFiles('input[type="file"].el-upload__input',[asset.path]);
    try{await page.waitForFunction(()=>window.__studioUpload?.pending||window.__studioUpload?.error,undefined,{timeout:20000});}
@@ -75,6 +78,7 @@ export async function stageFinishedUploads(page,input,record,persist){
    }
    const plan=await page.evaluate(()=>({pending:window.__studioUpload.pending,error:window.__studioUpload.error}));if(plan.error)throw Error(plan.error);
    const existing=await fetch(plan.pending.url,{method:'HEAD',redirect:'error',signal:AbortSignal.timeout(15000)});
+   if(distinctFrom&&existing.status!==404)throw Error('新ERP原图对象地址已存在或未知，未覆盖');
    if(existing.status===200)await verifyRemoteAsset(plan.pending.url,asset);
    else if(existing.status!==404)throw Error('确定性图片对象状态不明，未覆盖');
    // Durable URL and source hash precede the actual upload. A crash can be

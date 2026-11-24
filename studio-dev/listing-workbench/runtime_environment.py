@@ -74,17 +74,13 @@ def python_command(environ=None):
 
 
 def ego_command(project=None, environ=None):
-    return automation_command('ego-browser', project, environ)
-
-
-def automation_command(tool, project=None, environ=None):
     env = os.environ if environ is None else environ
     root = Path(project) if project is not None else project_root(environ=env)
-    script = root / 'automation' / {'ego-browser':'ego_browser.py','ziniao-plugin':'ziniao_plugin.py'}[tool]
+    script = root / 'automation/ego_browser.py'
     if not script.is_file():
         raise FileNotFoundError('Missing local Ego adapter; no browser action was started')
     if getattr(sys, 'frozen', False) and not env.get(PYTHON_ENV, '').strip():
-        return [sys.executable, '--workbench-tool', tool]
+        return [sys.executable, '--workbench-tool', 'ego-browser']
     return python_command(env) + ['-X', 'utf8', str(script)]
 
 
@@ -124,8 +120,10 @@ def diagnose(app_dir=None, environ=None):
     except (OSError, ValueError, TypeError) as error:
         check('project-config', False, str(error))
         return result
-    from runtime_files import REQUIRED_FILES
-    for relative in REQUIRED_FILES:
+    for relative in ('automation/ego_browser.py', 'junfei-publisher/ego_link.py',
+                     'junfei-publisher/ego-existing-draft.mjs',
+                     'junfei-publisher/ego-library-package.mjs',
+                     'junfei-publisher/listing.mjs'):
         check(relative, (root / relative).is_file(), relative)
     try:
         env = os.environ if environ is None else environ

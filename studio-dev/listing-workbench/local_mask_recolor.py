@@ -50,24 +50,23 @@ def render_fabric(source, alpha, protected, target, *, texture=1., exposure=0., 
     broad=cv2.GaussianBlur(light*weights,(0,0),sigma)/np.maximum(cv2.GaussianBlur(weights,(0,0),sigma),1e-5)
     broad=np.where(weights>0,broad,light)
     centre=float(np.median(light[a>.95]))
-    mapped=lab.copy()
-    relative=broad-centre
-    tonal=.8*relative*(1+tuning['contrast']/100)*tuning['lighting']
-    # Smooth, overlapping tonal weights prevent abrupt bands across folds.
+    from colour_transfer import transfer
+    candidate,_=transfer(source,a,color,protected=protection,blend=False)
+    mapped=cv2.cvtColor(np.asarray(candidate.convert('RGB'),dtype=np.float32)/255,cv2.COLOR_RGB2LAB)
+    relative=light-centre
     shade=np.clip(-relative/35,0,1);shine=np.clip(relative/35,0,1)
     shade=shade*shade*(3-2*shade);shine=shine*shine*(3-2*shine)
-    mapped[:,:,0]=target_lab[0]+exposure+tuning['brightness']+tonal+texture*(light-broad)+tuning['shadows']*shade+tuning['highlights']*shine
-    # Only the extreme shoulder is compressed; local knit detail below it is linear.
-    high=mapped[:,:,0]>96
-    mapped[:,:,0][high]=96+3*(1-np.exp(-(mapped[:,:,0][high]-96)/3))
-    mapped[:,:,0]=mapped[:,:,0].clip(1,99)
+    mapped[:,:,0]+=exposure+tuning['brightness']+(texture-1)*(light-broad)
+    mapped[:,:,0]+=relative*tuning['contrast']/100+tuning['shadows']*shade+tuning['highlights']*shine
+    mapped[:,:,0]=target_lab[0]+(mapped[:,:,0]-target_lab[0])*tuning['lighting']
+    mapped[:,:,0]=mapped[:,:,0].clip(0,100)
     if illumination is not None:
         keep=np.asarray(illumination.convert('L') if isinstance(illumination,Image.Image) else illumination,dtype=float)/255
         if keep.shape!=a.shape or not np.isfinite(keep).all() or np.any((keep<0)|(keep>1)):raise ValueError('亮度保护必须与母版尺寸相同')
         mapped[:,:,0]=mapped[:,:,0]*(1-keep)+light*keep
     # Optional local colour variation belongs to the source fabric. Do not
     # transfer its old broad colour cast, or tint neutral black/white targets.
-    mapped[:,:,1:]=target_lab[1:]*tuning['saturation']
+    mapped[:,:,1:]*=tuning['saturation']
     if tuning['colorDetail'] and not tuning['removeCast']:
         chroma=lab[:,:,1:]
         smooth=cv2.GaussianBlur(chroma*weights[:,:,None],(0,0),sigma)/np.maximum(cv2.GaussianBlur(weights,(0,0),sigma)[:,:,None],1e-5)

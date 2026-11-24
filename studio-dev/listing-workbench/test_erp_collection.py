@@ -102,12 +102,12 @@ class CollectionTests(unittest.TestCase):
         record['nativeTransfer']['draftId']='124'
         with self.assertRaisesRegex(ValueError,'原生转入'):erp.verified_result({},record,snapshot)
 
-    def preflight_evidence(self,script,*,after_import=False,entry_parent=None):
+    def preflight_evidence(self,script,*,after_import=False):
         script=Path(script).resolve()
         digest=hashlib.sha256(script.read_bytes()).hexdigest()
         key=hashlib.sha256((str(script)+':'+digest).encode()).hexdigest()
         ledger=self.root/'automation/data/ego-executions';ledger.mkdir(parents=True,exist_ok=True)
-        entry=(entry_parent or self.root)/('round-'+'a'*32+'.mjs')
+        entry=self.root/('round-'+'a'*32+'.mjs')
         message='专属采集浏览器连接已变化，请重新连接'
         guard='if(!connection)throw Error('+json.dumps(message,ensure_ascii=False)+');'
         imported='await import('+json.dumps(script.as_uri())+');'
@@ -132,26 +132,7 @@ class CollectionTests(unittest.TestCase):
             output,_,_=self.preflight_evidence(script,after_import=True)
             self.assertIsNone(erp.browser_preflight_failure(script,output,'app'))
 
-    def test_preflight_proof_accepts_recorded_entry_alias_without_losing_guard_checks(self):
-        script=self.root/'collect.mjs';script.write_text('// business script',encoding='utf-8')
-        alias=self.root/'entry~path';alias.mkdir()
-        with patch.object(erp,'PROJECT',self.root):
-            output,_,_=self.preflight_evidence(script,entry_parent=alias/'..')
-            output=output.replace(b'~',b'%7E')
-            proof=erp.browser_preflight_failure(script,output,'app')
-            self.assertIsNotNone(proof)
-            self.assertEqual(proof['line'],2)
-            self.assertEqual(Path(proof['entry']),self.root.resolve()/('round-'+'a'*32+'.mjs'))
-            self.assertIsNone(erp.browser_preflight_failure(script,output,'other-binding'))
-            output,_,_=self.preflight_evidence(script,entry_parent=alias/'..',after_import=True)
-            output=output.replace(b'~',b'%7E')
-            self.assertIsNone(erp.browser_preflight_failure(script,output,'app'))
-
     def test_bootstrap_failure_keeps_original_job_and_reports_proven_import_boundary(self):
-        adapters=self.root/'automation'
-        adapters.mkdir(exist_ok=True)
-        for script in ('ego_browser.py','ziniao_plugin.py'):
-            (adapters/script).touch()
         with patch.object(erp,'destinations',return_value=[self.destination]),patch.object(erp.threading,'Thread'):
             first=erp.start(2,self.workspace,{'productId':'P','destinationId':'store'})
         job=erp.owned(2,first['id'])

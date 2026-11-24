@@ -1,7 +1,7 @@
 // Connect the React editor to the account-scoped workspace and existing actions.
 const renderOutsideProductEditor = render;
 let productEditorHost;
-const editorSteps = {product:'素材与洞察',copy:'Listing 文案',visual:'视觉套图',delivery:'交付'};
+const editorSteps = {product:'素材与洞察',copy:'Listing 文案',visual:'商品作图',delivery:'交付'};
 
 function mergeCapturedAmazonCategory(product,reference){
  const source=product.sourceImport,evidence=reference.categoryEvidence;
@@ -22,7 +22,7 @@ function editorContext(p, step){
  };
  return {
   product:p,accountId:signedUser?.id,step,market:targetMarket,products:state.products,identity:productIdentity,copy:draft(),getCopy:draft,pending:p.pendingCopy?.[targetMarket]?.copy,
-  review:state.reviews[p.id]||{},completed:Boolean(productCompletionRecord(p)),online:serverReady,
+  review:state.reviews[p.id]||{},completed:productDisplayStatus(p)==='已完成',online:serverReady,
   prepareCollection:async()=>{const owner=signedUser;await flushWorkspace();if(signedUser!==owner||!current())throw Error('账号或产品已变化，请刷新后再采集');},
   savePublicationCommerce:async details=>{
    const owner=signedUser;await flushWorkspace();
@@ -31,7 +31,7 @@ function editorContext(p, step){
    const r=await fetch('/api/publication/commerce',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Account':String(owner.id)},body:JSON.stringify({productId:p.id,revision,details})});
    const result=await r.json();if(!r.ok)throw Error(result.error||'英国经营资料未保存');
    if(signedUser!==owner||syncPending||syncBusy||syncConflict||serverRevision!==revision)throw Error('英国资料已保存在服务端；本地另有修改，请刷新后核对');
-   acceptWorkspace(result,state);syncLabel('已保存到数据库');
+   state=result.state;serverRevision=result.revision;syncLabel('已保存到数据库');
   },
   busy:activeListingGeneration.has(key),notify:toast,goBack:()=>go('products'),
   navigate:(id,next)=>openListingWorkspace(id,next),
@@ -165,8 +165,11 @@ render=function(){
  if(!['listing','images'].includes(view)){
   window.JunfeiProductEditor?.unmount();productEditorHost=null;
   const result=renderOutsideProductEditor();
-  const batch=document.getElementById('productBatchListing');
-  if(batch){batch.disabled=!serverReady;batch.onclick=listingBatchDialog;}
+  const actions=view==='products'&&document.querySelector('#content .titlebar .actions');
+  if(actions){
+   const button=document.createElement('button');button.className='btn';button.textContent='批量生成 Listing';
+   button.disabled=!serverReady;button.onclick=listingBatchDialog;actions.append(button);
+  }
   return result;
  }
  const p=product();if(!p)return go('products');
@@ -185,15 +188,9 @@ render=function(){
   productEditorHost.textContent='正在加载 Listing 工作台…';
   document.getElementById('content').replaceChildren(productEditorHost);
  }
- if(syncConflict)showConflict();
  const host=productEditorHost;
  loadVisualEditor().then(()=>{
   if(host!==productEditorHost||!host.isConnected||selected!==p.id||listingWorkspaceStep!==step)return;
   window.JunfeiProductEditor.mount(host,editorContext(p,step));
- }).catch(error=>{
-  if(!host.isConnected)return;
-  const message=document.createElement('p');message.setAttribute('role','alert');message.textContent=error.message;
-  const retry=document.createElement('button');retry.className='btn primary';retry.textContent='重新加载编辑器';retry.onclick=render;
-  host.replaceChildren(message,retry);
- });
+ }).catch(error=>{if(host.isConnected)host.textContent=error.message});
 };

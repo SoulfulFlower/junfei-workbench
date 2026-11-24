@@ -182,6 +182,7 @@ def begin_submission(data, provider_name):
     attempt = {'id': 'submission-' + uuid.uuid4().hex, 'productId': product_id, 'slot': slot,
                'provider': provider_name, 'model': data['model'], 'status': 'submitting',
                'createdAt': time.time(), 'images': [], 'progress': 0,
+               'imageEngineTaskId': data.get('imageEngineTaskId'),
                'storyboardProjectId': data.get('storyboardProjectId'), 'storyboardSlot': data.get('storyboardSlot')}
     if provider_name == local_images.PROVIDER:
         attempt['requestedPromptId'] = str(uuid.UUID(attempt['id'].removeprefix('submission-')))
@@ -263,24 +264,6 @@ def provider_rejection(job):
     return None
 
 
-def product_cost_receipts(product_id):
-    path=ROOT/'image_jobs.sqlite3'
-    if not path.is_file():
-        return []
-    with closing(sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True)) as conn:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='image_costs'").fetchone():
-            return []
-        rows=conn.execute('SELECT id,reserved_fen,actual_fen,state,body FROM image_costs WHERE product_id=? ORDER BY rowid',
-                          (product_id,))
-        results=[]
-        for rid,reserved,actual,state,body in rows:
-            quote=json.loads(body).get('quote',{})
-            results.append({'reservationId':rid,'quoteCurrency':quote.get('currency'),
-                            'quoteMaximum':quote.get('maximumRmb') if quote.get('currency')=='CNY' else quote.get('maximumUsd'),
-                            'reservedFen':reserved,'settledFen':actual,'state':state})
-        return results
-
-
 def budget_status(product_id=None):
     with closing(storage()) as conn, conn:
         return image_budget.status(conn, product_id)
@@ -359,8 +342,12 @@ def storyboard_submission(data, project_id, slot):
     return {'storyboardProjectId': project_id, 'storyboardSlot': slot}
 
 
-def submit(data, *, storyboard_project_id=None, storyboard_slot=None, expected_provider=None):
-    linkage = storyboard_submission(data, storyboard_project_id, storyboard_slot)
+def submit(data, *, storyboard_project_id=None, storyboard_slot=None, expected_provider=None, image_engine_task_id=None):
+    if image_engine_task_id is not None:
+        import image_engine
+        linkage = image_engine.authorize(image_engine_task_id, data)
+    else:
+        linkage = storyboard_submission(data, storyboard_project_id, storyboard_slot)
     data = {**data, **linkage}
     model = data.get('model')
     prompt = data.get('prompt', '')
@@ -376,6 +363,8 @@ def submit(data, *, storyboard_project_id=None, storyboard_slot=None, expected_p
         raise ValueError('请选择支持的图片模型，并填写 1–12000 字的图片要求')
     if not isinstance(refs, list) or len(refs)>4:
         raise ValueError('请选择 1–4 张产品参考图')
+    if not refs and image_engine_task_id is not None:
+        raise ValueError('独立图片任务必须绑定商品参考图')
     if not refs:
         import visual_studio as visual
         project=visual.get_project(storyboard_project_id)
@@ -514,7 +503,7 @@ def poll(data):
                 pending = json.loads(attempt[0])
                 if pending.get('provider') == custom_images.PROVIDER and pending.get('responseReceipt'):
                     recovered_job = custom_images.recover(pending['responseReceipt'], pending['productId'], pending['slot'])
-                    for key in ('storyboardProjectId', 'storyboardSlot'):
+                    for key in ('storyboardProjectId', 'storyboardSlot', 'imageEngineTaskId'):
                         if pending.get(key) is not None:
                             recovered_job[key] = pending[key]
                     save(recovered_job)

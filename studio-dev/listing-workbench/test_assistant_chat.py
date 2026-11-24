@@ -112,27 +112,21 @@ class ChatTests(unittest.TestCase):
 
     def test_revision_retains_render_history_without_reusing_changed_card_qc(self):
         old=self.native_project()
-        history = {}
-        for index in (1, 2):
-            run_id = f'run-{index}'
-            result_url = '/api/studio/image?runId=' + run_id
-            history[index] = {'url': result_url, '_runId': run_id}
-            visual.save_run({'id': run_id, 'productId': old['productId'], 'projectId': old['id'],
-                             'slot': index, 'status': 'approved', 'image': f'https://example.test/{run_id}.png'})
-            old['uiPlan']['images'][index].update(final_url=result_url, base_url=result_url,
-                _runId=run_id, _status='approved', human_reviewed=True, render_qa={'ready':True})
+        for index in (1,2):
+            old['uiPlan']['images'][index].update(final_url='old-'+str(index),base_url='old-'+str(index),
+                _runId='run-'+str(index),_status='approved',human_reviewed=True,render_qa={'ready':True})
         visual.save_project(old)
         plan=copy.deepcopy(old['plan']);plan['slots'][2]['headline']='Revised knit detail'
         saved=visual.save_plan_revision({'id':old['id'],'plan':plan})
         changed=saved['uiPlan']['images'][2]
         for key in ('final_url','base_url','_runId','_status','human_reviewed','render_qa'):
             self.assertNotIn(key,changed)
-        self.assertIn(history[2], changed['versions'])
-        self.assertEqual(saved['plan']['slots'][1]['composition'], old['plan']['slots'][1]['composition'])
+        self.assertIn({'url':'old-2','_runId':'run-2'},changed['versions'])
+        self.assertEqual(saved['uiPlan']['images'][1],old['uiPlan']['images'][1])
         plan['lighting']='Different shared daylight'
         shared=visual.save_plan_revision({'id':old['id'],'plan':plan})
         self.assertNotIn('final_url',shared['uiPlan']['images'][1])
-        self.assertIn(history[1], shared['uiPlan']['images'][1]['versions'])
+        self.assertIn({'url':'old-1','_runId':'run-1'},shared['uiPlan']['images'][1]['versions'])
         self.assertEqual(visual.get_project(old['id']),old)
 
     def test_chat_uses_current_native_roles_and_rejects_stale_revision(self):

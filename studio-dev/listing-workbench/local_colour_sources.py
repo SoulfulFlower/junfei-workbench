@@ -37,11 +37,21 @@ def context(product):
             if not agent_review.studio_gallery_approved(product,project['id'],
                     [run for _,run,_ in originals],[hashlib.sha256(raw).hexdigest() for _,_,raw in originals]):
                 raise ValueError('母版需通过当前文件哈希绑定的自动检查及智能体草稿核对；不代替人工审核')
+        cards=(project.get('uiPlan') or {}).get('images') or []
         for slot,run,raw in originals:
-            cards=(project.get('uiPlan') or {}).get('images') or []
-            absent=bool(slot<len(cards) and cards[slot].get('product_presence')=='absent')
-            items.append(_item(slot,raw,baseRun=run['id'],productAbsent=absent))
+            card=cards[slot] if slot<len(cards) else {}
+            metadata={'baseRun':run['id'],'productAbsent':card.get('product_presence')=='absent'}
+            source_layout=run.get('sourceLayout') or {}
+            if (card.get('size_chart') is True and run.get('mode')=='source_layout'
+                    and source_layout.get('outputSha256')==hashlib.sha256(raw).hexdigest()):
+                from product_artwork import SIZE_CHART_PREVIEW_BOX
+                metadata['sizeChartPreviewBox']=list(SIZE_CHART_PREVIEW_BOX)
+            items.append(_item(slot,raw,**metadata))
         refs=project.get('references') or [];mid=project['id']
+    cards=(project.get('uiPlan') or {}).get('images') or []
+    for item in items:
+        if item['slot']<len(cards) and cards[item['slot']].get('size_chart') is True:
+            item['sharedSizeChart']={'policy':'all-variants-unchanged-v1','sourceSha256':item['sourceSha256']}
     if len(items)!=count or not refs:raise ValueError('母版图位或原始产品参考图不完整')
     return {'id':mid,'storyboardProjectId':project['id'],'reference':refs[0],'items':items,'count':count}
 

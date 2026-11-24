@@ -39,6 +39,7 @@ def native(project,runs):
     p['_projectId']=project['id'];p['_confirmed']=project['confirmed']
     if project.get('sizeEvidence'):
         p['sizeEvidenceStatus']=project['sizeEvidence'].get('status')
+        p['_sizeChartEvidence']=copy.deepcopy(project['sizeEvidence'])
     warnings=project['plan'].get('warnings',[])
     p['quality']={'ready':True,'issues':[{'code':'FACTS_TO_VERIFY','severity':'warning','message':w} for w in warnings]}
     analysis=project.get('analysis') or {}
@@ -82,9 +83,7 @@ def native(project,runs):
             image['final_url']='/api/studio/image?runId='+current['id'];image['base_url']=image['final_url']
         qc=current.get('qc',[])
         if qc:
-            selected=next((candidate['qc'] for candidate in current.get('candidates',[])
-                           if candidate['jobId']==current.get('selectedJobId')),None)
-            q=selected or qc[-1]
+            q=visual._revision_review(current)
             image['render_qa']={'ready':q['pass'],'review_model':q.get('reviewModel','历史审核模型'),'issues':[{'code':'AI_VISUAL','severity':'error','message':issue} for issue in q['issues']]}
             if 'score' in q:
                 image['render_qa']['score']=q['score']
@@ -134,18 +133,15 @@ def get_view(product):
             'selectedGallery':selected_gallery,
             'automaticProductSource':True}
 
-def task_save(task, *, handoff=None):
+def task_save(task):
     with closing(visual.db()) as c,c:
         c.execute('CREATE TABLE IF NOT EXISTS studio_tasks (id TEXT PRIMARY KEY, product_id TEXT, body TEXT, created REAL)')
         c.execute('INSERT OR REPLACE INTO studio_tasks VALUES (?,?,?,?)',(task['id'],task['productId'],json.dumps(task,ensure_ascii=False),task['created']))
-        if handoff:
-            import codex_handoff
-            codex_handoff.record(c,handoff,task['id'],'queued')
     return task
 
-def task_new(product,kind,total=1,*,handoff=None):
+def task_new(product,kind,total=1):
     task={'id':uuid.uuid4().hex,'productId':product['id'],'kind':kind,'status':'running','stage':'starting','message':'任务已提交到后台','progress':0,'done_count':0,'total':total,'created':time.time()}
-    task_save(task,handoff=handoff);return task
+    task_save(task);return task
 
 def latest_project(pid,kind):
     return next((p for p in visual.list_projects(pid)['projects'] if p.get('deliverable','gallery')==kind),None)
@@ -201,6 +197,11 @@ def persist(data,product):
             restores.append((index,original))
         for key in fields:
             if key in candidate:clean[key]=visual.bounded(candidate[key] or '',20000 if key=='render_prompt' else 1000)
+        if candidate.get('shot_type',current.get('shot_type')) != current.get('shot_type'):
+            if (index==0 or current.get('size_chart') or old.get('deliverable','gallery')!='gallery'
+                    or candidate.get('shot_type') not in ('detail','lifestyle','trust','hero_feature')):
+                raise ValueError('仅可调整普通辅助图的展示类型，不能改变主图或尺码表身份')
+            clean['shot_type']=candidate['shot_type']
         if 'scene_direction' in candidate:
             direction=candidate['scene_direction']
             if not isinstance(direction,dict) or any(
@@ -215,7 +216,7 @@ def persist(data,product):
         if clean['shot_type']=='white_main':
             for key in artwork_copy({**clean,'shot_type':'other'}):clean[key]=''
             clean['text_on_image']=False
-        edited=any(clean.get(k)!=current.get(k) for k in fields+('text_on_image','scene_direction'))
+        edited=any(clean.get(k)!=current.get(k) for k in fields+('text_on_image','scene_direction','shot_type'))
         if edited:changed.append(index)
         if candidate.get('human_reviewed') and not current.get('human_reviewed'):approvals.append(current.get('_runId'))
         if current.get('human_reviewed') and not candidate.get('human_reviewed') and current.get('_runId'):
@@ -261,7 +262,7 @@ def persist(data,product):
         r={**r,'id':uuid.uuid4().hex,'projectId':pid};visual.save_run(r)
     return {'message':'新版本已保存，修改的图片需重新生成','id':pid}
 
-def render(data,product,listing=None,*,codex_target=None,handoff=None):
+def render(data,product,listing=None):
     import product_insights
     kind=data.get('deliverable','gallery');p=latest_project(product['id'],kind)
     if not p:raise ValueError('请先策划套图')
@@ -290,28 +291,19 @@ def render(data,product,listing=None,*,codex_target=None,handoff=None):
     if config.get('size') not in ('1:1','4:5','3:4','16:9') or config.get('resolution') not in ('1K','2K','4K'):raise ValueError('图片比例或分辨率不支持')
     config={key:config[key] for key in ('model','size','resolution')}
     with LOCK:
-        if codex_target is not None:
-            from listing_jobs import digest
-            if (digest(latest_project(product['id'],kind)) != codex_target['projectDigest']
-                    or settings['activeProvider'] != codex_target['provider']):
-                raise ValueError('分镜或图像服务已变化，请重新核对')
-            if any(r.get('projectId')==p['id'] and r.get('slot') in indices
-                   for r in visual.list_projects(product['id'])['runs']):
-                raise ValueError('该图位已有原任务，请先核对')
         tasks=get_view(product)['jobs']
         if any(tasks.get(k,{}).get('status')=='running' for k in ('plan','render_set','render_image')):raise ValueError('图片正在制作，请等待当前批次完成')
         for index in indices:
             visual.check_render_prompt(p,index)
         p['confirmed']=True;p['set_qa']=None;visual.save_project(p)
-        task=task_new(product,'render_set' if len(indices)>1 else 'render_image',len(indices),handoff=handoff)
+        task=task_new(product,'render_set' if len(indices)>1 else 'render_image',len(indices))
     def work():
         failures=[]
         try:
             for position,index in enumerate(indices):
                 task.update(stage='card-'+str(index),message='正在生成第'+str(index+1)+'张并检查外观与文字',progress=position/len(indices));task_save(task)
                 r=visual.generate({'id':p['id'],'slot':index,'autoRepair':data.get('autoRepair') is True,**config},
-                                  expected_provider=settings['activeProvider'], only_new=codex_target is not None,
-                                  expected_project_digest=digest(p) if codex_target is not None else None)
+                                  expected_provider=settings['activeProvider'])
                 while True:
                     r=visual.get_run(r['id'])
                     if r['status'] in TERMINAL:break
@@ -392,10 +384,16 @@ def review_set(data,product):
         try:
             technical_issues=image_quality.duplicate_issues(pixels)
             if p.get('deliverable','gallery')=='gallery':
-                for index, raw in enumerate(pixels[1:],2):
+                for index, raw in enumerate(pixels,1):
                     technical_issues.extend(
                         {**issue,'message':f"第 {index} 张：{issue['message']}"}
-                        for issue in image_quality.inspect(raw,full_bleed=True)['issues']
+                        for issue in __import__('image_composition').for_project(raw,p,index-1)['issues']
+                        if issue['severity']=='error'
+                    )
+                    technical_issues.extend(
+                        {**issue,'message':f"第 {index} 张：{issue['message']}"}
+                        for issue in image_quality.inspect(raw,main=index==1,full_bleed=index!=1,
+                            size_chart=bool(index<=len((p.get('uiPlan') or {}).get('images',[])) and p['uiPlan']['images'][index-1].get('size_chart')))['issues']
                         if issue['severity']=='error'
                     )
             local=any(visual.get_run(image['_runId']).get('imageProvider')==image_provider.local_images.PROVIDER
@@ -473,12 +471,14 @@ def review_set(data,product):
                                   'appropriate source before calling them invented. Hidden or contradictory details still fail.')
                 supplements=[]
                 if p.get('deliverable','gallery')=='gallery':
-                    # Contact-sheet downsampling can erase fine garment pocket
-                    # edges. Supply the saved full-size hero and environmental
-                    # views, rather than asking the model to invent missing parts.
-                    indices=[n for n,im in enumerate(images) if n==0 or im.get('product_presence')=='environmental']
+                    # A contact sheet establishes variety, but downsamples the
+                    # very pocket, seam and table details each card must prove.
+                    # Supply every saved gallery artwork at its actual size;
+                    # metadata roles must not hide a close feature from review.
+                    indices=range(len(images))
                     for n in indices:
-                        context.setdefault('supplementalImages',[]).append({'inputImageNumber':len(source_references)+len(supplements)+3,'slotNumber':n+1})
+                        context.setdefault('supplementalImages',[]).append({'inputImageNumber':len(source_references)+len(supplements)+3,'slotNumber':n+1,
+                            'sourceSha256':hashlib.sha256(pixels[n]).hexdigest()})
                         supplements.append('data:image/png;base64,'+base64.b64encode(pixels[n]).decode('ascii'))
                     instruction+=(' Supplemental images are the same saved artwork pixels at higher resolution; '
                                   'match them using supplementalImages. Check alleged missing parts there before failing. '
@@ -490,6 +490,8 @@ def review_set(data,product):
                 if type(result.get('ready')) is not bool or not isinstance(result.get('issues'),list):raise ValueError('整套复核格式异常')
                 result['modelReady']=result['ready']
                 result['reviewInput']='numbered_contact_sheet'
+                if context.get('supplementalImages'):
+                    result['supplementalArtworkReferences']=context['supplementalImages']
                 warnings_only=bool(result['issues']) and all(i.get('severity')=='warning' for i in result['issues'])
                 result['ready']=(result['ready'] or warnings_only) and not any(i.get('severity')!='warning' for i in result['issues'])
             result['imageHashes']=[hashlib.sha256(raw).hexdigest() for raw in pixels]
@@ -506,15 +508,10 @@ def review_set(data,product):
         task_save(task)
     threading.Thread(target=work,daemon=True).start();return task
 
-def result_image(run_id, *, local_only=False):
-    return result_bytes(visual.get_run(run_id), local_only=local_only)
-
-
-def result_bytes(r, *, local_only=False):
-    run_id=r['id'];url=r.get('image')
+def result_image(run_id):
+    r=visual.get_run(run_id);url=r.get('image')
     if not url:raise ValueError('此任务没有成图')
-    cache=image_provider.ROOT/'studio-results'
-    if not local_only:cache.mkdir(exist_ok=True)
+    cache=image_provider.ROOT/'studio-results';cache.mkdir(exist_ok=True)
     path=cache/(run_id+'.image') if url.startswith('local:') else cache/(run_id+'-'+hashlib.sha256(url.encode()).hexdigest()[:16]+'.image')
     if url.startswith('local:') and not path.is_file():
         import re
@@ -529,7 +526,6 @@ def result_bytes(r, *, local_only=False):
     elif url.startswith('/uploads/'):
         raw=image_provider.local_image(url)
     else:
-        if local_only:raise ValueError('请先在视觉页打开并缓存成品图，再核对草稿')
         u=urlsplit(url)
         if u.scheme!='https' or not u.hostname or u.username or u.password or u.port not in (443,None):raise ValueError('成图地址不安全')
         addresses=socket.getaddrinfo(u.hostname,443,type=socket.SOCK_STREAM)
@@ -538,7 +534,7 @@ def result_bytes(r, *, local_only=False):
         if len(raw)>25*1024*1024:raise ValueError('成图文件超过25MB')
     mime='image/png' if raw.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg' if raw.startswith(b'\xff\xd8\xff') else 'image/webp' if raw[:4]==b'RIFF' and raw[8:12]==b'WEBP' else None
     if not mime:raise ValueError('生成链接未返回有效PNG/JPG/WebP图片')
-    if not local_only and not path.exists():
+    if not path.exists():
         tmp=path.with_suffix('.tmp-'+uuid.uuid4().hex);tmp.write_bytes(raw);tmp.replace(path)
     return raw,mime
 

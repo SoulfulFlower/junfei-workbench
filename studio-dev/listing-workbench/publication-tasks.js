@@ -37,7 +37,7 @@ function productCompletionRecord(product){
  const owner=typeof signedUser==='undefined'?null:signedUser?.id;
  const jobs=productPublicationJobsFor(product),formal=jobs.find(publicationJobCompleted);
  if(formal)return{market:'US / UK',store:[formal.sourceStore,formal.targetStore].filter(Boolean).join(' / '),taskId:formal.usPublishId,
-  ukTaskId:formal.ukPublishId,checkedAt:formal.onlineVerified?(formal.ukPublicationObservation?.observedAt||null):formal.submittedAt?new Date(formal.submittedAt*1000).toISOString():null,verifiedLive:formal.onlineVerified===true};
+  ukTaskId:formal.ukPublishId,checkedAt:formal.submittedAt?new Date(formal.submittedAt*1000).toISOString():null,verifiedLive:false};
  const accepted=publicationAcceptedStatuses;
  const p=product.erpPublication;
  if(p&&publicationNumber(p.recordId||p.publishId||p.taskId)&&accepted.has(p.status)&&
@@ -49,7 +49,7 @@ function productCompletionRecord(product){
       typeof c.sku==='string'&&(!product.sku||c.sku.startsWith(product.sku+'-')))){
   return{market:p.marketplace||p.market||product.market||product.sourceImport?.market||'US',store:p.store,
    taskId:p.recordId||p.publishId||p.taskId,parentAsin:p.parentAsin,count:p.children.length,
-   checkedAt:p.checkedAt,verifiedLive:p.allChildrenOnline===true&&p.children.every(c=>['active','online','buyable'].includes(c.status))};
+   checkedAt:p.checkedAt,verifiedLive:p.allChildrenOnline===true};
  }
  const d=product.erpProductionDraft,o=product.erpPublishObservation;
  if(d?.published===true&&publicationNumber(d.taskId)&&!d.libraryDraftOnly&&
@@ -59,16 +59,13 @@ function productCompletionRecord(product){
   const market=o?.marketplace||d.marketplace;
   if(market&&(!d.marketplace||d.marketplace===market))return{market,store:d.store,taskId:d.taskId,
    parentAsin:o?.parentAsin||d.parentAsin,checkedAt:o?.checkedAt,
-   count:o?.children?.length,verifiedLive:d.verifiedLive===true&&o?.allChildrenOnline===true&&
-    String(o.taskId||o.publishId||o.recordId)===String(d.taskId)&&Array.isArray(o.children)&&o.children.length>0&&
-    o.children.every(c=>typeof c.sku==='string'&&c.sku.startsWith(product.sku+'-')&&['active','online','buyable'].includes(c.status))};
+   count:o?.children?.length,verifiedLive:d.verifiedLive===true&&o?.allChildrenOnline===true};
  }
  return null;
 }
 
 function productDisplayStatus(product){
- const completion=productCompletionRecord(product);
- if(completion)return completion.verifiedLive?'在售已核验':'发布已受理 · 在售待核验';
+ if(productCompletionRecord(product))return '已完成';
  const owner=typeof signedUser==='undefined'?null:signedUser?.id;
  if(productPublicationJobsFor(product).some(job=>['needs_reconciliation','failed','blocked'].includes(job.status)||
    [job.usPublicationObservation,job.ukPublicationObservation].some(o=>o&&(o.failed===true||o.verification==='failed'))))return '需修改';
@@ -117,12 +114,9 @@ async function mountPublicationTasks(host){
   host.innerHTML='<h2>美国 → 英国发布任务</h2><p class="sub">从产品交付页的正式发布入口启动。草稿交付任务继续保留。</p>'+(data.jobs.length?data.jobs.map(j=>`<div class="reviewitem"><div><strong>${esc(j.productName||j.parentSku)}</strong><p>${esc(j.sourceStore)} → ${esc(j.targetStore)}</p><p>${esc(j.phase)}</p><small>美国发布 ${esc(j.usPublishId||'未取得')} · 英国草稿 ${esc(j.ukDraftId||'未取得')} · 英国发布 ${esc(j.ukPublishId||'未取得')}</small>${j.error?`<p>${esc(j.error)}</p>`:''}</div><div class="actions"><button class="btn" data-publication-product="${esc(j.productId)}">查看产品</button>${j.status==='needs_reconciliation'?`<button class="btn" data-publication-resume="${esc(j.id)}">核对原回执并继续</button>`:''}</div></div>`).join(''):'<p>暂无发布任务，未自动处理现有产品。</p>');
   host.querySelectorAll('[data-publication-product]').forEach(button=>button.onclick=()=>openListingWorkspace(button.dataset.publicationProduct,'delivery'));
   host.querySelectorAll('[data-publication-resume]').forEach(button=>button.onclick=async()=>{
-   if(!current())return;
+   if(!current()||!window.confirm('从原回执核对并继续此美国→英国发布任务？已有复制和发布意图不会重新提交。'))return;
    button.disabled=true;
-   try{
-    const result=await window.confirmPublicationOperation(owner.id,'continue',{id:button.dataset.publicationResume,confirmed:true});
-    if(result&&current())await mountPublicationTasks(host);
-   }
+   try{const r=await fetch('/api/publication/continue',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Account':String(owner.id)},body:JSON.stringify({id:button.dataset.publicationResume,confirmed:true})});const data=await r.json();if(!r.ok)throw Error(data.error);if(current())await mountPublicationTasks(host);}
    catch(e){if(current())toast(e.message)}finally{if(button.isConnected)button.disabled=false}
   });
   publicationTaskTimer=setTimeout(()=>{if(current())void mountPublicationTasks(host)},3000);

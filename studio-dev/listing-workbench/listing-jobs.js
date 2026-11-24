@@ -25,12 +25,11 @@ async function refreshDurableListingWorkspace(owner,job){
  if(signedUser!==owner||syncPending||syncBusy||syncConflict)return false;
  if(job.workspaceRevision&&job.workspaceRevision<=serverRevision)return true;
  const before=serverRevision;
- const response=await fetch('/api/state?readOnly=1',{cache:'no-store'});
+ const response=await fetch('/api/state',{cache:'no-store'});
  if(!response.ok)throw Error('结果已保存在服务端，暂时无法读取最新文案');
  const data=await response.json();
  if(signedUser!==owner||syncPending||syncBusy||syncConflict||serverRevision!==before)return false;
- if(!data.state)return false;
- acceptWorkspace(data,state);
+ state=data.state;serverRevision=data.revision;
  syncLabel('已保存到数据库');
  if(['listing','images','products'].includes(view))render();
  return true;
@@ -160,7 +159,7 @@ async function durableGenerateCurrent(p,targetMarket,button,{batch=false}={}){
   await flushWorkspace();
   if(!owner||signedUser!==owner||!state.products.some(item=>item.id===p.id))throw Error('账号或产品已变化');
   const requestId=globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
-  job=(await durableListingApi('start',{productId:p.id,market:targetMarket,requestId,expectedRevision:serverRevision,confirmPaidText:true})).job;
+  job=(await durableListingApi('start',{productId:p.id,market:targetMarket,requestId,expectedRevision:serverRevision})).job;
   if(signedUser!==owner)return {status:'background',message:'任务已保存在原账号'};
   rememberDurableListing(owner,job);
   await refreshDurableListingWorkspace(owner,job);

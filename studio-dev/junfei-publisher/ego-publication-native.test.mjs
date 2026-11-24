@@ -284,7 +284,10 @@ test('copy preserves source association while exposing generated SKUs for UK cor
   submit:async()=>{assert.equal(record.phase,'copy_unknown');assert.equal(record.intent.sourcePublishId,'202');writes++;}};
  await copyNative({},{source:input,target:input,sourcePublication},record,async()=>{},api);
  assert.equal(record.draftId,'303');assert.equal(record.sourceLink.sourcePublishId,'202');assert.equal(record.phase,'copy_verified');assert.equal(record.identity.copiedParentSku,'Generated');
- await copyNative({},{source:input,target:input,sourcePublication},record,async()=>{},api);assert.equal(writes,1);
+ const readRewrite=async()=>assert.fail('verified UK draft must not re-read a rewritten US gallery');
+ await copyNative({},{source:input,target:input,sourcePublication},record,async()=>{},{...api,readSource:readRewrite,querySourceRows:readRewrite});assert.equal(writes,1);
+ const broken=structuredClone(record);broken.sourceLink.draftId='404';
+ await assert.rejects(copyNative({},{source:input,target:input,sourcePublication},broken,async()=>{},{...api,readSource:readRewrite}),/原关联证明/);
  input.ukTarget.categoryHints={path:'Actual UK category selected after copy'};
  await copyNative({},{source:input,target:input,sourcePublication},record,async()=>{},api);assert.equal(writes,1);
  const changed=structuredClone(input);changed.ukTarget.storeName='Other UK store';

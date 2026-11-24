@@ -11,8 +11,8 @@ from PIL import Image, ImageDraw
 import visual_studio as studio
 
 def raster_fixture():
-    image=Image.new('RGB',(64,64),'white')
-    ImageDraw.Draw(image).rectangle((12,12,52,52),fill='blue')
+    image=Image.new('RGB',(64,64),'#9dc5d9')
+    ImageDraw.Draw(image).rectangle((3,3,60,60),fill='blue')
     stream=io.BytesIO()
     image.save(stream,'JPEG')
     return stream.getvalue(),'image/jpeg'
@@ -521,8 +521,15 @@ class VisualTests(unittest.TestCase):
                     observedText='Size Guide Size Bust Shoulder Length cm S 112 46 63',issues=[],
                     observedSizeChart={**observed,'singleHeader':True})
         with patch.object(studio,'encode_reference',return_value='supplier-image'), \
-             patch.object(studio,'model_json',side_effect=[answer,{**answer,'observedSizeChart':{**observed,'singleHeader':False}}]):
+             patch.object(studio,'model_json',side_effect=[answer,
+                 {**answer,'observedSizeChart':{**observed,'singleHeader':False}},
+                 {**answer,'observedSizeChart':observed,'singleHeader':True},
+                 {**answer,'singleHeader':False},
+                 {**answer,'observedSizeChart':{**observed,'rows':[['S','113','46','63']]},'singleHeader':True}]):
             self.assertTrue(studio.review(project,6,'rendered-chart')['pass'])
+            self.assertFalse(studio.review(project,6,'rendered-chart')['pass'])
+            self.assertTrue(studio.review(project,6,'rendered-chart')['pass'])
+            self.assertFalse(studio.review(project,6,'rendered-chart')['pass'])
             self.assertFalse(studio.review(project,6,'rendered-chart')['pass'])
 
     def test_worn_garment_occlusion_overrides_label_visibility(self):
@@ -586,15 +593,19 @@ class VisualTests(unittest.TestCase):
 
     def test_vision_uses_primary_image_and_no_invented_fallback(self):
         proposal=director_fixture()
-        for index,layout in {1:'poster_hero',2:'detail_macro',5:'scenario_mosaic',6:'trust_close'}.items():
-            proposal['images'][index]['layout']=layout
-        proposal['images'][3]['product_presence']='environmental'
+        # The primary-vision regression uses the current user-requested seven
+        # slots. Other fixture consumers retain their original historical sets.
+        for index in (1,2):proposal['images'][index].update(layout='detail_macro',shot_type='detail')
+        for index in (3,4,5):proposal['images'][index].update(layout='human_context',shot_type='lifestyle')
         with patch.object(studio,'encode_reference',return_value=truth_fixture()),patch.object(studio,'model_json',side_effect=[identity_fixture(),proposal]) as model:
             result=studio.plan({'references':['primary','detail'],'brief':'Clean','visual_tone':'editorial'}, {'id':'new','name':'Shirt','market':'UK'}, {'title':'Shirt'})
         self.assertFalse(result['confirmed'])
         self.assertEqual(model.call_args_list[0].args[2],[truth_fixture()]*2)
-        self.assertEqual(model.call_args_list[1].args[2],[])
-        self.assertEqual(result['engine']['version'],2)
+        # The director now receives the real product AND each original template.
+        self.assertEqual(len(model.call_args_list[1].args[2]),1+len(result['analysis']['layoutTemplates']))
+        self.assertTrue(all(row['originalSha256'] and row['promptSha256'] for row in result['analysis']['layoutTemplates']))
+        self.assertEqual(result['engine']['version'],5)
+        self.assertFalse(result['apparelOrchestration']['formalSizeChartGateBypassed'])
         self.assertEqual(result['productionMode'],'ai_master')
         provider = studio.image_provider
         with self.assertRaises(provider.StoryboardRequired):
@@ -605,7 +616,7 @@ class VisualTests(unittest.TestCase):
         self.assertIn('AI MASTER PRODUCTION',model.call_args_list[1].args[0])
         self.assertIn('Tone requested: editorial',model.call_args_list[1].args[0])
         self.assertEqual(result['uiPlan']['visual_tone'],'editorial')
-        self.assertIn('at most one standalone macro',model.call_args_list[1].args[0])
+        self.assertIn('USER-REQUESTED SEVEN-IMAGE CONTRACT',model.call_args_list[1].args[0])
         self.assertNotIn('PRODUCTION ECONOMY:',model.call_args_list[1].args[0])
         with patch.object(studio,'encode_reference',side_effect=ValueError('bad reference')):
             with self.assertRaises(ValueError):studio.plan({'references':['bad']},{'id':'new'}, {})
@@ -646,11 +657,18 @@ class VisualTests(unittest.TestCase):
             run=studio.generate({**self.options,'id':p['id'],'slot':1,'autoRepair':True})
             studio.advance(run['id'])
         first, retry=[call.args[0] for call in submit.call_args_list]
-        self.assertEqual(first['references'],['verified'])
+        self.assertEqual(first['references'][0],'verified')
+        self.assertEqual(len(first['references']),2)
+        self.assertEqual(first['references'][1],p['uiPlan']['images'][1]['template_url'])
+        self.assertNotIn('layout_blueprint',p['uiPlan']['images'][1])
+        official=p['uiPlan']['images'][1]['official_template']
+        self.assertEqual(official['url'],first['references'][1])
+        self.assertIn(official['prompt'],first['prompt'])
+        self.assertNotIn('Abstract coloured rectangles',first['prompt'])
         self.assertEqual(first['expectedProductReferenceSha256'],p['analysis']['referenceHashes']['verified'])
         self.assertEqual(retry['references'],first['references'])
         self.assertEqual(retry['expectedReferenceSha256'],['recorded-hash'])
-        self.assertEqual(review.call_args.kwargs['submitted_references'],['verified'])
+        self.assertEqual(review.call_args.kwargs['submitted_references'],first['references'])
         self.assertTrue(first['prompt'].startswith('[PRODUCT PRESENCE]'))
         self.assertEqual(first['prompt'].count('[SOURCE EVIDENCE]'),1)
         self.assertIn('Square front placket',first['prompt'])
@@ -957,6 +975,27 @@ class VisualTests(unittest.TestCase):
                          [(main,non_white),(detail,non_white)])
         self.assertEqual(select_automatic_product_truth([detail,white],encoded.__getitem__,capture)[0],
                          (white,encoded[white]))
+
+    def test_master_truth_uses_verified_child_without_relabelling_entry_asin(self):
+        from ivyea_pipeline import captured_asin_truth
+        from copy import deepcopy
+        entry='B000000001'; child='B000000002'
+        main='https://m.media-amazon.com/images/I/brown.jpg'
+        fallback='https://m.media-amazon.com/images/I/silver.jpg'
+        row={'asin':child,'color_name':'Brown','size_name':'Small','sku':'own-brown-S'}
+        product={'asin':entry,'market':'US','masterColor':'Brown',
+            'sourceImport':{'market':'US','amazon':{'variants':[row],'listingEligibleVariants':[row]}},
+            'editorAsinReference':{'selectedAsin':entry,'market':'US','capturedAt':'2026-11-20',
+                'referenceImages':[fallback],'variants':[{'asin':child,'color':'Brown'}],
+                'colors':[{'color':'Brown','mainImage':{'url':main,'sourceAsin':child,
+                    'sourceUrl':'https://www.amazon.com/dp/'+child,'checkedAt':'2026-11-20'}}]}}
+        original=deepcopy(product)
+        self.assertEqual(captured_asin_truth(product),{'kind':'asin_main','asin':child,'url':main})
+        self.assertEqual(product,original)
+        product['editorAsinReference']['colors'][0]['mainImage']['sourceUrl']='https://www.amazon.com/dp/'+entry
+        self.assertEqual(captured_asin_truth(product),{'kind':'asin_main','asin':entry,'url':fallback})
+        product['market']='UK'
+        self.assertIsNone(captured_asin_truth(product))
 
     def test_explicit_nonwhite_source_requires_selected_current_captured_asin_main(self):
         from ivyea_pipeline import captured_asin_truth, select_product_truth
